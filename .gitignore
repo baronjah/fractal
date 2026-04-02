@@ -10,4 +10,4 @@ server/databases/
 server/scripts/
 server/bundles/
 godot/
-docs/
+docs/*.db
