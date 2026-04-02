@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — NUMBERS{% endblock %}
+{% block content %}
+<h2>◈ L IS FOR LUCK</h2>
+
+{% set mc_map = {'FLOW':'badge-flow','CHAOS':'badge-chaos','BUILD':'badge-build','BALANCE':'badge-balance','AMPLIFIED':'badge-amp'} %}
+{% set mc = mc_map.get(luck.mode, '') %}
+
+<div style="text-align:center; margin-bottom:24px;">
+  <div class="orb" style="width:120px; height:120px; color:{{ luck.color }}; background:{{ luck.color }}22; border:1px solid {{ luck.color }}44; font-size:2.5em; margin:0 auto 12px;">
+    {% if luck.mode == 'FLOW' %}🌊{% elif luck.mode == 'CHAOS' %}⚡{% elif luck.mode == 'BUILD' %}🔨{% elif luck.mode == 'BALANCE' %}⚖{% else %}✦{% endif %}
+  </div>
+  <div style="font-size:3em; color:{{ luck.color }}; font-weight:bold;">{{ luck.value }}</div>
+  <div style="margin:6px 0;"><span class="badge {{ mc }}" style="font-size:1em; padding:4px 14px;">{{ luck.mode }}</span></div>
+  <div style="color:var(--text); font-size:1.1em; margin:4px 0;">{{ luck.meaning }}</div>
+  <div style="color:var(--muted);">{{ luck.vibe }}</div>
+</div>
+
+<div class="grid2" style="margin-bottom:14px;">
+  <div class="panel">
+    <h3>CALCULATE ANY INPUT</h3>
+    <form id="calc-form" style="margin-bottom:10px;">
+      <div style="margin-bottom:6px;"><input id="calc-input" placeholder="name, date, phrase, number..."></div>
+      <button type="submit" style="width:100%">CALCULATE</button>
+    </form>
+    <div id="calc-result"></div>
+  </div>
+
+  <div class="panel">
+    <h3>NUMBER REFERENCE</h3>
+    <div id="ref-table"></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>LUCK LOG (last calculations)</h3>
+  <div id="luck-log">loading...</div>
+</div>
+
+<script>
+const MODE_CLASS={FLOW:'badge-flow',CHAOS:'badge-chaos',BUILD:'badge-build',BALANCE:'badge-balance',AMPLIFIED:'badge-amp'};
+
+// static reference table from luck_tables (loaded from API)
+async function loadRef() {
+  // we approximate: build from known modes
+  const MODES = [
+    [1,'FLOW','#FFD700','Go. Start. Push.'],
+    [2,'BALANCE','#87CEEB','Wait. Listen. Connect.'],
+    [3,'FLOW','#FFA500','Play. Create. Speak.'],
+    [4,'BUILD','#8B4513','Work. Build. Endure.'],
+    [5,'CHAOS','#FF4444','Alert. Shift. Adapt.'],
+    [6,'BALANCE','#98FB98','Care. Stabilize. Give.'],
+    [7,'CHAOS','#9400D3','Dig. Question. Beware.'],
+    [8,'BUILD','#4169E1','Execute. Gain. Control.'],
+    [9,'FLOW','#FF69B4','Finish. Let go. Rise.'],
+    [11,'AMPLIFIED','#FFFFFF','Everything x10.'],
+    [22,'AMPLIFIED','#FFFF00','Everything x10. Build.'],
+    [33,'AMPLIFIED','#00FFFF','Everything x10. Heal.'],
+  ];
+  const el = document.getElementById('ref-table');
+  el.innerHTML = `<table>
+    <thead><tr><th>N</th><th>MODE</th><th>VIBE</th></tr></thead>
+    <tbody>${MODES.map(([n,m,c,v])=>`
+      <tr>
+        <td style="color:${c}; font-size:1.2em; font-weight:bold;">${n}</td>
+        <td><span class="badge ${MODE_CLASS[m]||''}">${m}</span></td>
+        <td style="color:var(--muted);font-size:0.82em">${v}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+document.getElementById('calc-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const txt = document.getElementById('calc-input').value.trim();
+  if (!txt) return;
+  const res = await fetch('/api/numbers/calculate', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({text:txt})
+  });
+  const lk = await res.json();
+  const mc = MODE_CLASS[lk.mode]||'';
+  document.getElementById('calc-result').innerHTML =
+    `<div style="padding:10px; border:1px solid ${lk.color}44; border-radius:6px; background:${lk.color}11;">
+      <div style="font-size:2.5em; color:${lk.color}; font-weight:bold;">${lk.value}</div>
+      <span class="badge ${mc}">${lk.mode}</span>
+      <span style="color:var(--muted); margin-left:8px;">${lk.meaning}</span>
+      <div style="margin-top:6px; color:var(--text);">${lk.vibe}</div>
+      ${lk.numbers_found?.length?`<div style="color:var(--muted);font-size:0.8em;margin-top:4px">found: ${lk.numbers_found.join(', ')}</div>`:''}
+      <div style="color:var(--muted);font-size:0.75em;margin-top:4px">raw sum: ${lk.raw_sum}</div>
+    </div>`;
+  loadLog();
+});
+
+async function loadLog() {
+  const res = await fetch('/api/numbers/log?limit=30');
+  const rows = await res.json();
+  const el = document.getElementById('luck-log');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);padding:8px">no calculations yet</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>TIME</th><th>INPUT</th><th>VALUE</th><th>MODE</th><th>NOTES</th></tr></thead>
+    <tbody>${rows.map(r=>`
+      <tr>
+        <td style="color:var(--muted)">${r.timestamp?.slice(11,19)||''}</td>
+        <td style="font-size:0.85em">${(r.input||'').slice(0,60)}</td>
+        <td style="color:var(--cyan); font-size:1.2em">${r.calculated_value}</td>
+        <td><span class="badge ${MODE_CLASS[r.luck_mode]||''}">${r.luck_mode}</span></td>
+        <td style="color:var(--muted);font-size:0.8em">${r.notes||''}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+loadRef(); loadLog();
+setInterval(loadLog, 10000);
+
+// auto-refresh current luck orb
+setInterval(async () => {
+  const res = await fetch('/api/numbers/current');
+  const lk = await res.json();
+  // just update the number display without full reload
+  document.querySelector('.orb').style.color = lk.color;
+}, 30000);
+</script>
+{% endblock %}

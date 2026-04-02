@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — DASHBOARD{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+  <h2>◈ FRACTAL DASHBOARD</h2>
+  <div style="text-align:center;">
+    {% set mc = luck.get('color','#ffffff') %}
+    <div class="orb" style="color:{{ mc }}; background: {{ mc }}22; border: 1px solid {{ mc }}44;">
+      {% if luck.mode == 'FLOW' %}🌊{% elif luck.mode == 'CHAOS' %}⚡{% elif luck.mode == 'BUILD' %}🔨{% elif luck.mode == 'BALANCE' %}⚖{% else %}✦{% endif %}
+    </div>
+    <div>
+      <span class="badge badge-{{ luck.mode|lower }}">{{ luck.mode }}</span>
+      <span style="color:var(--muted); font-size:0.8em; margin-left:6px;">{{ luck.value }}</span>
+    </div>
+    <div style="color:var(--muted); font-size:0.75em; margin-top:4px;">{{ luck.vibe }}</div>
+  </div>
+</div>
+
+<div class="grid-auto">
+
+  <!-- LIVE SIGNAL FEED -->
+  <div class="panel">
+    <h3>LIVE SIGNALS</h3>
+    <div id="signal-feed" style="height:220px; overflow-y:auto;"></div>
+  </div>
+
+  <!-- SCHEDULER STATUS -->
+  <div class="panel">
+    <h3>SCHEDULER</h3>
+    <div id="sched-list" style="height:220px; overflow-y:auto;"></div>
+  </div>
+
+  <!-- DEMON CATCHER — PATTERN LOG -->
+  <div class="panel">
+    <h3>DEMON CATCHER</h3>
+    <div id="pattern-list" style="height:160px; overflow-y:auto; margin-bottom:10px;"></div>
+    <form id="catch-form" style="display:flex; gap:6px;">
+      <input type="text" id="catch-input" placeholder="type anything..." style="flex:1;">
+      <button type="submit">CATCH</button>
+    </form>
+  </div>
+
+  <!-- DATABASE TABLE STATS -->
+  <div class="panel">
+    <h3>DATABASE</h3>
+    <div id="db-stats"></div>
+  </div>
+
+  <!-- LUCK QUICK-CALC -->
+  <div class="panel">
+    <h3>NUMBER ORACLE</h3>
+    <form id="luck-form" style="display:flex; gap:6px; margin-bottom:10px;">
+      <input type="text" id="luck-input" placeholder="name, date, word...">
+      <button type="submit">CALC</button>
+    </form>
+    <div id="luck-result"></div>
+  </div>
+
+</div>
+
+<script>
+const MODE_CLASS = {FLOW:'badge-flow',CHAOS:'badge-chaos',BUILD:'badge-build',BALANCE:'badge-balance',AMPLIFIED:'badge-amp'};
+
+async function loadSignals() {
+  const res = await fetch('/api/signals?limit=20');
+  const rows = await res.json();
+  const el = document.getElementById('signal-feed');
+  el.innerHTML = rows.map(r =>
+    `<div class="log-line">
+       <span class="ts">${r.timestamp?.slice(11,19)||''}</span>
+       <span class="src">${r.signal_id}</span>
+       <span style="color:#888">${r.source||''}</span>
+       ${r.payload ? `<span style="color:#555"> ${r.payload.slice(0,60)}</span>`:''}
+     </div>`
+  ).join('');
+}
+
+async function loadScheduler() {
+  const res = await fetch('/api/scheduler/jobs');
+  const rows = await res.json();
+  const el = document.getElementById('sched-list');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);padding:8px">no jobs</div>'; return; }
+  el.innerHTML = rows.map(r =>
+    `<div class="log-line">
+       <span class="ts">${r.enabled?'▶':'◼'}</span>
+       <span class="src">${r.script_id}</span>
+       <span style="color:#555">${r.type} / ${r.interval_sec}s</span>
+       <button onclick="runJob('${r.script_id}')" style="float:right;padding:1px 6px;font-size:0.75em">▶ run</button>
+     </div>`
+  ).join('');
+}
+
+async function runJob(id) {
+  await fetch('/api/scheduler/run/'+id, {method:'POST'});
+  loadScheduler();
+}
+
+async function loadPatterns() {
+  const res = await fetch('/api/patterns?limit=20');
+  const rows = await res.json();
+  const el = document.getElementById('pattern-list');
+  el.innerHTML = rows.map(r => {
+    const mc = MODE_CLASS[r.luck_mode||''] || '';
+    return `<div class="log-line">
+      <span class="ts">${r.timestamp?.slice(11,19)||''}</span>
+      <span class="badge ${mc}">${r.luck_score||''}</span>
+      <span style="color:var(--muted);margin-left:4px">${(r.content||'').slice(0,60)}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadDbStats() {
+  const res = await fetch('/api/db/stats');
+  const stats = await res.json();
+  const el = document.getElementById('db-stats');
+  el.innerHTML = `<table>
+    <thead><tr><th>TABLE</th><th>ROWS</th></tr></thead>
+    <tbody>${Object.entries(stats).map(([t,c])=>
+      `<tr><td><a href="/db">${t}</a></td><td style="color:var(--cyan)">${c}</td></tr>`
+    ).join('')}</tbody>
+  </table>`;
+}
+
+// catch form
+document.getElementById('catch-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const inp = document.getElementById('catch-input');
+  const txt = inp.value.trim();
+  if (!txt) return;
+  const res = await fetch('/api/patterns/catch', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({content:txt, source:'user_dashboard'})
+  });
+  const data = await res.json();
+  inp.value = '';
+  loadPatterns();
+  // show luck feedback briefly
+  const lr = document.getElementById('luck-result');
+  const lk = data.luck;
+  const mc = MODE_CLASS[lk.mode]||'';
+  lr.innerHTML = `<div style="padding:8px; border:1px solid var(--border); border-radius:4px;">
+    <span class="badge ${mc}">${lk.mode}</span>
+    <span style="margin-left:8px; color:${lk.color}">${lk.value} — ${lk.vibe}</span>
+  </div>`;
+});
+
+// luck form
+document.getElementById('luck-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const inp = document.getElementById('luck-input');
+  const txt = inp.value.trim();
+  if (!txt) return;
+  const res = await fetch('/api/numbers/calculate', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({text: txt})
+  });
+  const lk = await res.json();
+  const mc = MODE_CLASS[lk.mode]||'';
+  document.getElementById('luck-result').innerHTML =
+    `<div style="padding:8px; border:1px solid var(--border); border-radius:4px; margin-top:6px;">
+      <span class="badge ${mc}">${lk.mode}</span>
+      <span style="color:${lk.color}; font-size:1.4em; margin:0 10px">${lk.value}</span>
+      <span style="color:var(--muted)">${lk.meaning}</span>
+      <div style="color:var(--text); margin-top:4px; font-size:0.85em">${lk.vibe}</div>
+      ${lk.numbers_found.length?`<div style="color:var(--muted);font-size:0.8em;margin-top:4px">found: ${lk.numbers_found.join(', ')}</div>`:''}
+    </div>`;
+});
+
+// initial load + live polling
+loadSignals(); loadScheduler(); loadPatterns(); loadDbStats();
+setInterval(loadSignals,  2000);
+setInterval(loadPatterns, 5000);
+setInterval(loadDbStats,  10000);
+setInterval(loadScheduler,10000);
+</script>
+{% endblock %}

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — DEMON CATCHER{% endblock %}
+{% block content %}
+<h2>◈ DEMON CATCHER — PATTERN LOG</h2>
+
+<div class="grid2" style="margin-bottom:14px;">
+  <div class="panel">
+    <h3>CATCH SOMETHING</h3>
+    <form id="catch-form" style="margin-bottom:10px;">
+      <textarea id="catch-input" rows="3" placeholder="type anything..."></textarea>
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <select id="catch-type" style="width:120px">
+          <option value="text">text</option>
+          <option value="command">command</option>
+          <option value="json">json</option>
+          <option value="log">log</option>
+        </select>
+        <button type="submit" style="flex:1">CATCH</button>
+      </div>
+    </form>
+    <div id="catch-result"></div>
+  </div>
+  <div class="panel">
+    <h3>ACTIVE HOURS (by pattern count)</h3>
+    <div id="hours-chart"></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+    <h3 style="margin:0">ALL PATTERNS</h3>
+    <input type="text" id="filter-src" placeholder="filter source..." style="width:160px;">
+    <button onclick="loadPatterns()">FILTER</button>
+    <span style="color:var(--muted);font-size:0.8em;margin-left:auto">auto-refresh 5s</span>
+  </div>
+  <div id="pattern-table"></div>
+</div>
+
+<script>
+const MODE_CLASS={FLOW:'badge-flow',CHAOS:'badge-chaos',BUILD:'badge-build',BALANCE:'badge-balance',AMPLIFIED:'badge-amp'};
+
+document.getElementById('catch-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const txt  = document.getElementById('catch-input').value.trim();
+  const type = document.getElementById('catch-type').value;
+  if (!txt) return;
+  const res = await fetch('/api/patterns/catch', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({content:txt, source:'user_patterns_page', type})
+  });
+  const data = await res.json();
+  const lk = data.luck;
+  const mc = MODE_CLASS[lk.mode]||'';
+  document.getElementById('catch-result').innerHTML =
+    `<div style="padding:8px; border:1px solid var(--border); border-radius:4px; margin-top:4px;">
+      <span class="badge ${mc}">${lk.mode}</span>
+      <span style="color:${lk.color}; font-size:1.3em; margin:0 10px">${lk.value}</span>
+      <span style="color:var(--muted)">${lk.meaning}</span>
+      <div style="color:var(--text); font-size:0.85em; margin-top:4px">${lk.vibe}</div>
+      <div style="color:var(--muted); font-size:0.78em">${lk.numbers_found?.length?'numbers: '+lk.numbers_found.join(', '):''}</div>
+    </div>`;
+  loadPatterns();
+});
+
+async function loadPatterns() {
+  const src = document.getElementById('filter-src').value;
+  let url = '/api/patterns?limit=100';
+  if (src) url += '&source=' + encodeURIComponent(src);
+  const res = await fetch(url);
+  const rows = await res.json();
+  const el = document.getElementById('pattern-table');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);padding:8px">nothing caught yet</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>#</th><th>TIME</th><th>SOURCE</th><th>TYPE</th><th>LUCK</th><th>WORDS</th><th>CONTENT</th><th>NUMBERS</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const mc=MODE_CLASS[r.luck_mode||'']||'';
+      return `<tr>
+        <td style="color:var(--muted)">${r.id}</td>
+        <td style="color:var(--muted)">${r.timestamp?.slice(11,19)||''}</td>
+        <td style="color:var(--accent)">${r.source||''}</td>
+        <td style="color:var(--muted)">${r.content_type||''}</td>
+        <td><span class="badge ${mc}">${r.luck_score}</span></td>
+        <td style="color:var(--muted)">${r.word_count}</td>
+        <td style="font-size:0.85em">${(r.content||'').slice(0,80)}</td>
+        <td style="color:var(--muted);font-size:0.8em">${r.numbers_found||''}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+async function loadHours() {
+  const res = await fetch('/api/patterns/hours');
+  const data = await res.json();
+  const active = data.active || [];
+  const lucky  = data.lucky  || [];
+  const el = document.getElementById('hours-chart');
+  if (!active.length) { el.innerHTML = '<div style="color:var(--muted)">no data yet</div>'; return; }
+  const max = Math.max(...active.map(r=>r.count), 1);
+  el.innerHTML = active.slice(0,10).map(r => {
+    const pct = Math.round(r.count / max * 100);
+    const lk  = lucky.find(l=>l.hour===r.hour);
+    return `<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+      <span style="color:var(--muted);width:24px">${r.hour}h</span>
+      <div style="flex:1; background:var(--bg3); border-radius:2px; height:14px;">
+        <div style="width:${pct}%;background:var(--accent);height:100%;border-radius:2px;"></div>
+      </div>
+      <span style="color:var(--muted);width:28px;font-size:0.8em">${r.count}</span>
+      ${lk?`<span style="color:var(--yellow);font-size:0.78em">⭐${parseFloat(lk.avg_luck).toFixed(1)}</span>`:''}
+    </div>`;
+  }).join('');
+}
+
+loadPatterns(); loadHours();
+setInterval(loadPatterns, 5000);
+setInterval(loadHours, 30000);
+</script>
+{% endblock %}

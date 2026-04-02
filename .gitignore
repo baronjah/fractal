@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-wal
+*.db-shm
+*.log
+.env
+server/databases/
+server/scripts/
+server/bundles/
+godot/
+docs/

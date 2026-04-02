@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — DATABASE{% endblock %}
+{% block content %}
+<h2>DATABASE BROWSER</h2>
+
+<div class="grid-auto" style="margin-bottom:14px;">
+  {% for table, count in stats.items() %}
+  <div class="panel" style="cursor:pointer;" onclick="browseTable('{{ table }}')">
+    <div style="color:var(--accent); font-size:0.85em; margin-bottom:4px;">{{ table }}</div>
+    <div style="font-size:1.6em; color:var(--cyan);">{{ count }}</div>
+    <div style="color:var(--muted); font-size:0.75em;">rows</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="panel" style="margin-bottom:14px;">
+  <h3>QUERY</h3>
+  <div style="display:flex; gap:6px; margin-bottom:8px;">
+    <input id="sql-input" placeholder="SELECT * FROM patterns_log LIMIT 20" style="flex:1; font-family:monospace">
+    <button onclick="runQuery()">RUN</button>
+  </div>
+  <div style="color:var(--muted); font-size:0.78em;">SELECT only. Click a table card above to auto-browse.</div>
+</div>
+
+<div class="panel">
+  <h3 id="browse-title">RESULTS</h3>
+  <div id="query-result">click a table or run a query</div>
+</div>
+
+<script>
+function browseTable(name) {
+  document.getElementById('sql-input').value = `SELECT * FROM ${name} ORDER BY id DESC LIMIT 50`;
+  document.getElementById('browse-title').textContent = name.toUpperCase();
+  runQuery();
+}
+
+async function runQuery() {
+  const sql = document.getElementById('sql-input').value.trim();
+  if (!sql) return;
+  const res = await fetch('/api/db/query', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({sql})
+  });
+  const data = await res.json();
+  const el = document.getElementById('query-result');
+  if (data.error) {
+    el.innerHTML = `<div style="color:var(--red)">${data.error}</div>`;
+    return;
+  }
+  if (!data.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">no rows</div>';
+    return;
+  }
+  const cols = Object.keys(data[0]);
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+    <tbody>${data.map(row=>`
+      <tr>${cols.map(c=>`<td style="font-size:0.82em;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${row[c]===null?'<span style="color:var(--muted)">null</span>':String(row[c]).slice(0,200)}</td>`).join('')}</tr>
+    `).join('')}</tbody>
+  </table></div>`;
+}
+
+// refresh stats every 15s
+async function refreshStats() {
+  const res = await fetch('/api/db/stats');
+  const stats = await res.json();
+  // update numbers in panel cards (simple: reload page would be easy but this keeps state)
+}
+setInterval(refreshStats, 15000);
+</script>
+{% endblock %}

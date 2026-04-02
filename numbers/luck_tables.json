@@ -1,0 +1,86 @@
+{
+  "1": {
+    "mode": "FLOW",
+    "meaning": "Leadership, new beginnings, independence",
+    "color": "#FFD700",
+    "element": "fire",
+    "vibe": "Go. Start. Push."
+  },
+  "2": {
+    "mode": "BALANCE",
+    "meaning": "Cooperation, patience, duality",
+    "color": "#87CEEB",
+    "element": "water",
+    "vibe": "Wait. Listen. Connect."
+  },
+  "3": {
+    "mode": "FLOW",
+    "meaning": "Creativity, expression, joy",
+    "color": "#FFA500",
+    "element": "fire",
+    "vibe": "Play. Create. Speak."
+  },
+  "4": {
+    "mode": "BUILD",
+    "meaning": "Structure, discipline, foundation",
+    "color": "#8B4513",
+    "element": "earth",
+    "vibe": "Work. Build. Endure."
+  },
+  "5": {
+    "mode": "CHAOS",
+    "meaning": "Change, freedom, instability",
+    "color": "#FF4444",
+    "element": "air",
+    "vibe": "Alert. Shift. Adapt."
+  },
+  "6": {
+    "mode": "BALANCE",
+    "meaning": "Harmony, responsibility, nurturing",
+    "color": "#98FB98",
+    "element": "water",
+    "vibe": "Care. Stabilize. Give."
+  },
+  "7": {
+    "mode": "CHAOS",
+    "meaning": "Analysis, mystery, the unknown",
+    "color": "#9400D3",
+    "element": "ether",
+    "vibe": "Dig. Question. Beware."
+  },
+  "8": {
+    "mode": "BUILD",
+    "meaning": "Power, ambition, material mastery",
+    "color": "#4169E1",
+    "element": "earth",
+    "vibe": "Execute. Gain. Control."
+  },
+  "9": {
+    "mode": "FLOW",
+    "meaning": "Completion, wisdom, release",
+    "color": "#FF69B4",
+    "element": "fire",
+    "vibe": "Finish. Let go. Rise."
+  },
+  "11": {
+    "mode": "AMPLIFIED",
+    "meaning": "Master intuition, illumination",
+    "color": "#FFFFFF",
+    "element": "light",
+    "vibe": "Everything x10. Stay present."
+  },
+  "22": {
+    "mode": "AMPLIFIED",
+    "meaning": "Master builder, large-scale vision",
+    "color": "#FFFF00",
+    "element": "light",
+    "vibe": "Everything x10. Build something real."
+  },
+  "33": {
+    "mode": "AMPLIFIED",
+    "meaning": "Master teacher, compassion at scale",
+    "color": "#00FFFF",
+    "element": "light",
+    "vibe": "Everything x10. Heal something."
+  }
+}

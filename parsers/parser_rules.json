@@ -1,0 +1,43 @@
+{
+  ".txt": {
+    "strip_blank_lines": true,
+    "normalize_whitespace": true,
+    "extract_numbers": true,
+    "extract_lines": true
+  },
+  ".md": {
+    "strip_blank_lines": false,
+    "normalize_whitespace": true,
+    "extract_numbers": true,
+    "extract_headers": true,
+    "extract_lines": true
+  },
+  ".py": {
+    "strip_comments": true,
+    "strip_blank_lines": true,
+    "normalize_whitespace": true,
+    "extract_numbers": true,
+    "extract_functions": true
+  },
+  ".gd": {
+    "strip_comments": true,
+    "strip_blank_lines": true,
+    "normalize_whitespace": true,
+    "extract_numbers": true,
+    "extract_functions": true
+  },
+  ".json": {
+    "normalize_whitespace": false,
+    "extract_numbers": true
+  },
+  ".log": {
+    "strip_blank_lines": true,
+    "normalize_whitespace": true,
+    "extract_numbers": true,
+    "extract_timestamps": true
+  },
+  ".csv": {
+    "normalize_whitespace": false,
+    "extract_numbers": true
+  }
+}

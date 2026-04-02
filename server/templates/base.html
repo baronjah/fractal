@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}FRACTAL{% endblock %}</title>
+<style>
+  :root {
+    --bg:      #0a0a0f;
+    --bg2:     #111118;
+    --bg3:     #1a1a24;
+    --border:  #2a2a3a;
+    --text:    #d0d0e8;
+    --muted:   #606080;
+    --accent:  #7744ff;
+    --green:   #44ff88;
+    --red:     #ff4455;
+    --yellow:  #ffcc33;
+    --orange:  #ff8833;
+    --cyan:    #33ddff;
+    font-size: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Consolas", "Courier New", monospace;
+    min-height: 100vh;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--cyan); }
+
+  /* ── nav ── */
+  nav {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+  }
+  nav .logo { color: var(--accent); font-size: 1.1em; font-weight: bold; margin-right: 16px; }
+  nav a {
+    padding: 4px 10px;
+    border-radius: 4px;
+    color: var(--muted);
+    font-size: 0.9em;
+  }
+  nav a:hover, nav a.active { background: var(--bg3); color: var(--text); }
+
+  /* ── layout ── */
+  .page { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  h2 { color: var(--accent); font-size: 1em; margin-bottom: 12px; letter-spacing: 2px; text-transform: uppercase; }
+  h3 { color: var(--muted); font-size: 0.85em; letter-spacing: 1px; margin-bottom: 8px; }
+
+  /* ── cards / panels ── */
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+
+  /* ── table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+  th { color: var(--muted); text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 4px 8px; border-bottom: 1px solid #15151f; }
+  tr:hover td { background: var(--bg3); }
+
+  /* ── badge / pill ── */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 0.78em; font-weight: bold; }
+  .badge-flow   { background: #1a3322; color: var(--green); }
+  .badge-chaos  { background: #331522; color: var(--red); }
+  .badge-build  { background: #1a2233; color: var(--cyan); }
+  .badge-balance{ background: #222211; color: var(--yellow); }
+  .badge-amp    { background: #221133; color: #cc99ff; }
+
+  /* ── buttons ── */
+  button, .btn {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 12px; border-radius: 4px;
+    cursor: pointer; font-family: inherit; font-size: 0.85em;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── form ── */
+  input, textarea, select {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 8px; border-radius: 4px;
+    font-family: inherit; font-size: 0.9em; width: 100%;
+  }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+
+  /* ── log entry ── */
+  .log-line { padding: 3px 0; border-bottom: 1px solid #12121c; font-size: 0.83em; }
+  .log-line .ts { color: var(--muted); margin-right: 8px; }
+  .log-line .src { color: var(--accent); margin-right: 6px; }
+
+  /* ── luck orb ── */
+  .orb {
+    width: 80px; height: 80px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8em;
+    box-shadow: 0 0 30px currentColor;
+    animation: pulse 2s ease-in-out infinite;
+    margin: 0 auto 8px;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.9; }
+    50%       { transform: scale(1.06); opacity: 1; }
+  }
+
+  /* ── scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+
+<nav>
+  <span class="logo">◈ FRACTAL</span>
+  <a href="/"         {% if request.path == '/'          %}class="active"{% endif %}>DASHBOARD</a>
+  <a href="/signals"  {% if request.path == '/signals'   %}class="active"{% endif %}>SIGNALS</a>
+  <a href="/scheduler"{% if request.path == '/scheduler' %}class="active"{% endif %}>SCHEDULER</a>
+  <a href="/patterns" {% if request.path == '/patterns'  %}class="active"{% endif %}>PATTERNS</a>
+  <a href="/db"       {% if request.path == '/db'        %}class="active"{% endif %}>DATABASE</a>
+  <a href="/numbers"  {% if request.path == '/numbers'   %}class="active"{% endif %}>NUMBERS</a>
+</nav>
+
+<div class="page">
+  {% block content %}{% endblock %}
+</div>
+
+</body>
+</html>

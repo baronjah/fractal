@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — SCHEDULER{% endblock %}
+{% block content %}
+<h2>SCHEDULER</h2>
+
+<div class="grid2" style="margin-bottom:14px;">
+  <div class="panel">
+    <h3>ADD JOB</h3>
+    <form id="add-form">
+      <div style="margin-bottom:6px;"><input id="j-path" placeholder="script path..."></div>
+      <div style="margin-bottom:6px;"><input id="j-label" placeholder="label (optional)"></div>
+      <div style="display:flex; gap:6px; margin-bottom:6px;">
+        <select id="j-type" style="width:120px">
+          <option value="interval">interval</option>
+          <option value="cron">cron</option>
+        </select>
+        <input id="j-interval" placeholder="seconds (interval)" style="flex:1">
+      </div>
+      <div style="margin-bottom:8px;"><input id="j-cron" placeholder="cron expr: 0 * * * * (optional)"></div>
+      <button type="submit" style="width:100%">ADD JOB</button>
+    </form>
+    <div id="add-result" style="margin-top:8px;"></div>
+  </div>
+  <div class="panel">
+    <h3>RUN SCRIPT NOW</h3>
+    <form id="run-form">
+      <div style="margin-bottom:6px;"><input id="r-path" placeholder="script path..."></div>
+      <button type="submit" style="width:100%">RUN</button>
+    </form>
+    <div id="run-result" style="margin-top:8px; font-size:0.8em; max-height:160px; overflow-y:auto;"></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>JOB LIST</h3>
+  <div id="job-list">loading...</div>
+</div>
+
+<div class="panel">
+  <h3>SCRIPT HISTORY (last 30 runs)</h3>
+  <div id="history-list">loading...</div>
+</div>
+
+<script>
+async function loadJobs() {
+  const res = await fetch('/api/scheduler/jobs');
+  const rows = await res.json();
+  const el = document.getElementById('job-list');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);padding:8px">no jobs scheduled</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>JOB</th><th>TYPE</th><th>INTERVAL</th><th>LAST RUN</th><th>NEXT</th><th>ENABLED</th><th></th></tr></thead>
+    <tbody>${rows.map(r=>`
+      <tr>
+        <td style="color:var(--accent)">${r.script_id}</td>
+        <td>${r.type||''}</td>
+        <td style="color:var(--muted)">${r.interval_sec}s</td>
+        <td style="color:var(--muted)">${(r.last_run||'—').slice(11,19)}</td>
+        <td style="color:var(--muted)">${(r.next_run_live||'—').slice(11,19)}</td>
+        <td>${r.enabled?'<span style="color:var(--green)">▶ on</span>':'<span style="color:var(--muted)">◼ off</span>'}</td>
+        <td>
+          <button onclick="runJob('${r.script_id}')" style="padding:2px 8px">▶ now</button>
+          <button onclick="removeJob('${r.script_id}')" style="padding:2px 8px;margin-left:4px;color:var(--red)">✕</button>
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function loadHistory() {
+  const res = await fetch('/api/runner/history?limit=30');
+  const rows = await res.json();
+  const el = document.getElementById('history-list');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);padding:8px">no runs yet</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>SCRIPT</th><th>TIME</th><th>MS</th><th>TOKENS</th><th>RESULT</th></tr></thead>
+    <tbody>${rows.map(r=>`
+      <tr>
+        <td style="font-size:0.82em">${r.script_id}</td>
+        <td style="color:var(--muted)">${(r.run_time||'').slice(11,19)}</td>
+        <td style="color:var(--cyan)">${r.duration_ms}</td>
+        <td style="color:var(--muted)">${r.tokens_used}</td>
+        <td style="color:${r.result==='ok'?'var(--green)':'var(--red)'}">${r.result}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function runJob(id) {
+  const res = await fetch('/api/scheduler/run/'+id, {method:'POST'});
+  const data = await res.json();
+  document.getElementById('run-result').innerHTML =
+    `<pre style="color:var(--green)">${JSON.stringify(data,null,2)}</pre>`;
+  loadHistory();
+}
+
+async function removeJob(id) {
+  await fetch('/api/scheduler/remove/'+id, {method:'DELETE'});
+  loadJobs();
+}
+
+document.getElementById('add-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    script_path: document.getElementById('j-path').value.trim(),
+    label:       document.getElementById('j-label').value.trim()||undefined,
+    trigger:     document.getElementById('j-type').value,
+    interval_sec:parseInt(document.getElementById('j-interval').value||3600),
+    cron_expr:   document.getElementById('j-cron').value.trim()||undefined
+  };
+  const res = await fetch('/api/scheduler/add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  document.getElementById('add-result').innerHTML =
+    `<span style="color:${data.ok?'var(--green)':'var(--red)'}">${JSON.stringify(data)}</span>`;
+  loadJobs();
+});
+
+document.getElementById('run-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const path = document.getElementById('r-path').value.trim();
+  if (!path) return;
+  const res = await fetch('/api/runner/run', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({path})
+  });
+  const data = await res.json();
+  document.getElementById('run-result').innerHTML =
+    `<div style="color:${data.ok?'var(--green)':'var(--red)'}">
+      ${data.ok?'OK':'FAIL'} — ${data.duration_ms}ms — ${data.token_cost} tokens
+    </div>
+    <pre style="color:var(--muted);margin-top:4px">${(data.lines||[]).join('\n')}</pre>`;
+  loadHistory();
+});
+
+loadJobs(); loadHistory();
+setInterval(loadJobs, 10000);
+setInterval(loadHistory, 15000);
+</script>
+{% endblock %}

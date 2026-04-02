@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — SIGNALS{% endblock %}
+{% block content %}
+<h2>SIGNAL BUS</h2>
+
+<div class="panel" style="margin-bottom:14px;">
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <select id="filter-sig" style="width:140px">
+      <option value="">all signals</option>
+      <option value="SYS">SYS</option>
+      <option value="DAT">DAT</option>
+      <option value="SCH">SCH</option>
+      <option value="UI">UI</option>
+      <option value="PAT">PAT</option>
+      <option value="LCK">LCK</option>
+      <option value="EXT">EXT</option>
+    </select>
+    <input type="text" id="filter-src" placeholder="filter by source..." style="width:180px">
+    <button onclick="loadSignals()">FILTER</button>
+    <button onclick="emitUI()">EMIT UI SIGNAL</button>
+    <span style="color:var(--muted); font-size:0.8em; margin-left:auto">auto-refresh every 2s</span>
+  </div>
+</div>
+
+<div class="panel">
+  <div id="signal-table">loading...</div>
+</div>
+
+<script>
+async function loadSignals() {
+  const sig = document.getElementById('filter-sig').value;
+  const src = document.getElementById('filter-src').value;
+  let url = '/api/signals?limit=100';
+  if (sig) url += '&signal=' + sig;
+  if (src) url += '&source=' + encodeURIComponent(src);
+  const res = await fetch(url);
+  const rows = await res.json();
+  const el = document.getElementById('signal-table');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);padding:8px">no signals yet</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>#</th><th>TIME</th><th>SIGNAL</th><th>SOURCE</th><th>TARGET</th><th>STATUS</th><th>PAYLOAD</th></tr></thead>
+    <tbody>${rows.map(r=>`
+      <tr>
+        <td style="color:var(--muted)">${r.id}</td>
+        <td style="color:var(--muted)">${r.timestamp?.slice(11,19)||''}</td>
+        <td><span style="color:var(--accent)">${r.signal_id}</span></td>
+        <td>${r.source||''}</td>
+        <td style="color:var(--muted)">${r.target||''}</td>
+        <td>${r.status||''}</td>
+        <td style="color:var(--muted); font-size:0.8em">${(r.payload||'').slice(0,80)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function emitUI() {
+  await fetch('/api/signal/emit', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({signal_id:'UI', source:'user_signals_page', payload:{test:true}})
+  });
+  loadSignals();
+}
+
+loadSignals();
+setInterval(loadSignals, 2000);
+</script>
+{% endblock %}
