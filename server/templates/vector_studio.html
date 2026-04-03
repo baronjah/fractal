@@ -224,6 +224,22 @@
   <input id="canvas-h" type="number" value="600" min="100" max="4000" style="width:60px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:2px 5px;border-radius:3px;font-family:inherit;font-size:0.82em" onchange="resizeCanvas()">
   <button class="tb-btn" onclick="zoomFit()">FIT</button>
   <span id="zoom-display">100%</span>
+  <span class="sep">|</span>
+  <select id="viewport-preset" onchange="applyViewportPreset()" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);padding:2px 5px;border-radius:3px;font-family:inherit;font-size:0.78em">
+    <option value="">VIEWPORT</option>
+    <option value="800,600">800×600</option>
+    <option value="1280,720">1280×720 HD</option>
+    <option value="1920,1080">1920×1080 FHD</option>
+    <option value="2560,1440">2560×1440 QHD</option>
+    <option value="375,812">375×812 iPhone X</option>
+    <option value="390,844">390×844 iPhone 14</option>
+    <option value="414,896">414×896 iPhone XR</option>
+    <option value="360,800">360×800 Android</option>
+    <option value="768,1024">768×1024 iPad</option>
+    <option value="1024,1366">1024×1366 iPad Pro</option>
+    <option value="1366,768">1366×768 Laptop</option>
+    <option value="1440,900">1440×900 MacBook</option>
+  </select>
 </div>
 
 <!-- MAIN -->
@@ -425,9 +441,18 @@ let _dragging = false;
 let _dragStart = null;
 let _dragElemStart = null;
 
+// Resize state
+let _resizing = false;
+let _resizeHandle = -1;   // 0=TL 1=TM 2=TR 3=MR 4=BR 5=BM 6=BL 7=ML
+let _resizeBounds = null;
+
 // Canvas panning
 let _panning = false;
 let _panStart = null;
+
+// RAF zoom batching
+let _zoomRaf = false;
+let _zoomAccum = 1;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -531,13 +556,25 @@ function canvasMouseDown(e) {
   if (pt.x < 0 || pt.y < 0 || pt.x > w || pt.y > h) return;
 
   if (_tool === 'select') {
+    // resize handle hit first
+    const hIdx = resizeHandleAtPoint(e);
+    if (hIdx >= 0 && _selected) {
+      const el = getElementById(_selected);
+      if (el) {
+        _resizing = true;
+        _resizeHandle = hIdx;
+        _dragStart = pt;
+        _resizeBounds = getElementBounds(el);
+      }
+      return;
+    }
     const hit = elementAtPoint(e);
     if (hit) {
       selectElement(hit.id);
       _dragging = true;
       _dragStart = pt;
       const el = getElementById(hit.id);
-      _dragElemStart = { x: el.x, y: el.y };
+      _dragElemStart = getDragBase(el);
     } else {
       deselectAll();
     }
@@ -582,14 +619,25 @@ function canvasMouseMove(e) {
     return;
   }
 
+  if (_resizing && _selected) {
+    const el = getElementById(_selected);
+    if (el) {
+      applyResize(el, _resizeHandle, _resizeBounds, pt.x - _dragStart.x, pt.y - _dragStart.y);
+      renderSvgElement(el);
+      highlightSvgElement(el);
+      updatePropsPanel(el);
+    }
+    return;
+  }
+
   if (_dragging && _selected) {
     const dx = pt.x - _dragStart.x;
     const dy = pt.y - _dragStart.y;
     const el = getElementById(_selected);
     if (el) {
-      el.x = _dragElemStart.x + dx;
-      el.y = _dragElemStart.y + dy;
+      applyDragDelta(el, _dragElemStart, dx, dy);
       renderSvgElement(el);
+      highlightSvgElement(el);
       updatePropsPanel(el);
     }
     return;
@@ -602,6 +650,7 @@ function canvasMouseMove(e) {
 
 function canvasMouseUp(e) {
   if (_panning) { _panning = false; return; }
+  if (_resizing) { _resizing = false; _resizeHandle = -1; _resizeBounds = null; renderElements(); return; }
   if (_dragging) { _dragging = false; renderElements(); return; }
 
   if (_drawing && _drawStart) {
@@ -619,8 +668,15 @@ function canvasMouseUp(e) {
 
 function canvasWheel(e) {
   e.preventDefault();
-  const delta = e.deltaY > 0 ? 0.9 : 1.1;
-  applyZoom(_zoom * delta);
+  _zoomAccum *= e.deltaY > 0 ? 0.92 : 1.09;
+  if (!_zoomRaf) {
+    _zoomRaf = true;
+    requestAnimationFrame(() => {
+      applyZoom(_zoom * _zoomAccum);
+      _zoomAccum = 1;
+      _zoomRaf = false;
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -748,11 +804,8 @@ function deleteSelected() {
 function deselectAll() {
   if (_selected) {
     const svg = document.getElementById('svg-canvas');
-    const sel = svg.querySelector('[data-selected]');
-    if (sel) { sel.removeAttribute('data-selected'); sel.setAttribute('stroke-opacity','1'); }
-    // remove selection rect
-    const sr = svg.getElementById('__selrect__');
-    if (sr) sr.remove();
+    const sg = svg.getElementById('__sel_group__');
+    if (sg) sg.remove();
   }
   _selected = null;
   document.getElementById('st-sel').textContent = 'none';
@@ -1034,37 +1087,43 @@ function renderStampSvg(el) {
 
 function highlightSvgElement(el) {
   const svg = document.getElementById('svg-canvas');
-  const old = svg.getElementById('__selrect__');
+  const old = svg.getElementById('__sel_group__');
   if (old) old.remove();
-  // draw selection box
-  let bx, by, bw, bh;
-  if (el.type === 'ellipse') {
-    bx = el.cx-el.rx; by = el.cy-el.ry; bw = el.rx*2; bh = el.ry*2;
-  } else if (el.type === 'line') {
-    bx = Math.min(el.x1,el.x2); by = Math.min(el.y1,el.y2);
-    bw = Math.abs(el.x2-el.x1); bh = Math.abs(el.y2-el.y1);
-  } else if (el.type === 'text') {
-    bx = el.x; by = el.y; bw = 120; bh = (el.fontSize||13)+4;
-  } else {
-    bx = el.x||0; by = el.y||0; bw = el.w||120; bh = el.h||40;
-  }
+
+  const b = getElementBounds(el);
+  const {x:bx, y:by, w:bw, h:bh} = b;
+
+  const sg = document.createElementNS(SVG_NS, 'g');
+  sg.id = '__sel_group__';
+
   const r = document.createElementNS(SVG_NS, 'rect');
-  r.id = '__selrect__';
   r.setAttribute('x', bx-2); r.setAttribute('y', by-2);
   r.setAttribute('width', bw+4); r.setAttribute('height', bh+4);
   r.setAttribute('fill', 'none'); r.setAttribute('stroke', '#7744ff');
   r.setAttribute('stroke-width', '1'); r.setAttribute('stroke-dasharray', '4,2');
   r.setAttribute('pointer-events', 'none');
-  svg.appendChild(r);
-  // handles
-  [[bx-2,by-2],[bx+bw/2,by-2],[bx+bw+2,by-2],[bx+bw+2,by+bh/2],[bx+bw+2,by+bh+2],[bx+bw/2,by+bh+2],[bx-2,by+bh+2],[bx-2,by+bh/2]].forEach(([hx,hy]) => {
+  sg.appendChild(r);
+
+  // 8 handles: TL TM TR MR BR BM BL ML
+  const CURSORS = ['nw-resize','n-resize','ne-resize','e-resize','se-resize','s-resize','sw-resize','w-resize'];
+  const hpts = [
+    [bx-2,by-2],[bx+bw/2,by-2],[bx+bw+2,by-2],
+    [bx+bw+2,by+bh/2],
+    [bx+bw+2,by+bh+2],[bx+bw/2,by+bh+2],
+    [bx-2,by+bh+2],[bx-2,by+bh/2]
+  ];
+  hpts.forEach(([hx,hy], i) => {
     const h = document.createElementNS(SVG_NS, 'rect');
-    h.setAttribute('x',hx-3); h.setAttribute('y',hy-3);
-    h.setAttribute('width',6); h.setAttribute('height',6);
-    h.setAttribute('fill','#7744ff'); h.setAttribute('stroke','#fff');
-    h.setAttribute('stroke-width','0.5'); h.setAttribute('pointer-events','none');
-    svg.appendChild(h);
+    h.setAttribute('x',hx-5); h.setAttribute('y',hy-5);
+    h.setAttribute('width',10); h.setAttribute('height',10);
+    h.setAttribute('fill','#0a0a0f'); h.setAttribute('stroke','#7744ff');
+    h.setAttribute('stroke-width','1.5');
+    h.setAttribute('data-handle', String(i));
+    h.style.cursor = CURSORS[i];
+    sg.appendChild(h);
   });
+
+  svg.appendChild(sg);
 }
 
 function elementAtPoint(e) {
@@ -1405,12 +1464,10 @@ function generateExportHtml() {
   const h = document.getElementById('svg-canvas').getAttribute('height');
   const svgClone = document.getElementById('svg-canvas').cloneNode(true);
   // remove selection artifacts
-  ['__selrect__', '__ghost__'].forEach(id => {
+  ['__sel_group__', '__ghost__'].forEach(id => {
     const el = svgClone.getElementById(id);
     if (el) el.remove();
   });
-  // also remove handle rects (small 6x6 at selection corners)
-  Array.from(svgClone.querySelectorAll('rect[stroke="#fff"]')).forEach(r => r.remove());
 
   // Build wire JS
   const wireJs = _wires.map(w => {
@@ -1501,6 +1558,84 @@ function newCanvas() {
   _activeLayer = 'l1';
   _wires = []; _selected = null; _idSeq = 1;
   renderLayers(); renderElements(); renderWires(); updateCount();
+}
+
+// ══════════════════════════════════════════════════════════════
+// DRAG / RESIZE HELPERS
+// ══════════════════════════════════════════════════════════════
+function getDragBase(el) {
+  if (el.type === 'ellipse') return { cx: el.cx, cy: el.cy };
+  if (el.type === 'line')    return { x1: el.x1, y1: el.y1, x2: el.x2, y2: el.y2 };
+  return { x: el.x||0, y: el.y||0 };
+}
+
+function applyDragDelta(el, base, dx, dy) {
+  if (el.type === 'ellipse') {
+    el.cx = base.cx + dx; el.cy = base.cy + dy;
+  } else if (el.type === 'line') {
+    el.x1 = base.x1 + dx; el.y1 = base.y1 + dy;
+    el.x2 = base.x2 + dx; el.y2 = base.y2 + dy;
+  } else {
+    el.x = base.x + dx; el.y = base.y + dy;
+  }
+}
+
+function getElementBounds(el) {
+  if (el.type === 'ellipse') return { x: (el.cx||0)-(el.rx||0), y: (el.cy||0)-(el.ry||0), w: (el.rx||0)*2, h: (el.ry||0)*2 };
+  if (el.type === 'line')    return { x: Math.min(el.x1||0,el.x2||0), y: Math.min(el.y1||0,el.y2||0), w: Math.abs((el.x2||0)-(el.x1||0))||4, h: Math.abs((el.y2||0)-(el.y1||0))||4 };
+  if (el.type === 'text')    return { x: el.x||0, y: el.y||0, w: 120, h: (el.fontSize||13)+4 };
+  return { x: el.x||0, y: el.y||0, w: el.w||100, h: el.h||40 };
+}
+
+function applyResize(el, handle, b, dx, dy) {
+  // 0=TL 1=TM 2=TR 3=MR 4=BR 5=BM 6=BL 7=ML
+  let nx = b.x, ny = b.y, nw = b.w, nh = b.h;
+  const MIN = 8;
+  if      (handle === 0) { nx = b.x+dx; ny = b.y+dy; nw = b.w-dx; nh = b.h-dy; }
+  else if (handle === 1) { ny = b.y+dy; nh = b.h-dy; }
+  else if (handle === 2) { ny = b.y+dy; nw = b.w+dx; nh = b.h-dy; }
+  else if (handle === 3) { nw = b.w+dx; }
+  else if (handle === 4) { nw = b.w+dx; nh = b.h+dy; }
+  else if (handle === 5) { nh = b.h+dy; }
+  else if (handle === 6) { nx = b.x+dx; nw = b.w-dx; nh = b.h+dy; }
+  else if (handle === 7) { nx = b.x+dx; nw = b.w-dx; }
+  nw = Math.max(MIN, nw); nh = Math.max(MIN, nh);
+  if (el.type === 'ellipse') {
+    el.cx = nx + nw/2; el.cy = ny + nh/2; el.rx = nw/2; el.ry = nh/2;
+  } else if (el.type === 'line') {
+    el.x2 = el.x1 + nw; el.y2 = el.y1 + nh;
+  } else {
+    el.x = nx; el.y = ny; el.w = nw; el.h = nh;
+  }
+}
+
+function resizeHandleAtPoint(e) {
+  const svg = document.getElementById('svg-canvas');
+  const sg  = svg.getElementById('__sel_group__');
+  if (!sg) return -1;
+  const hit = document.elementFromPoint(e.clientX, e.clientY);
+  if (!hit) return -1;
+  let node = hit;
+  while (node && node !== svg) {
+    if (node.dataset?.handle !== undefined && node.dataset.handle !== '')
+      return parseInt(node.dataset.handle);
+    node = node.parentNode;
+  }
+  return -1;
+}
+
+// ══════════════════════════════════════════════════════════════
+// VIEWPORT PRESETS
+// ══════════════════════════════════════════════════════════════
+function applyViewportPreset() {
+  const val = document.getElementById('viewport-preset').value;
+  if (!val) return;
+  const [w, h] = val.split(',');
+  document.getElementById('canvas-w').value = w;
+  document.getElementById('canvas-h').value = h;
+  resizeCanvas();
+  setTimeout(zoomFit, 50);
+  document.getElementById('viewport-preset').value = '';
 }
 
 // ══════════════════════════════════════════════════════════════
