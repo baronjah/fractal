@@ -8,7 +8,7 @@ __pycache__/
 *.log
 .env
 server/databases/
-server/scripts/
+server/scripts/drop/
 server/bundles/
 godot/
 docs/*.db
