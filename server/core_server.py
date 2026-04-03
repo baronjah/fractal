@@ -92,6 +92,10 @@ def scripts_page():
 def modules_page():
     return render_template("modules.html")
 
+@app.route("/studio")
+def studio_page():
+    return render_template("vector_studio.html")
+
 # ── API — signal routes ───────────────────────────────────────────────────
 
 @app.route("/api/signals/routes")
