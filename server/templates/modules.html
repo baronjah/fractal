@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — MODULES{% endblock %}
+{% block content %}
+<h2>◈ MODULES</h2>
+<div style="color:var(--muted);margin-bottom:14px;font-size:0.9em;">Every module has one job. Click to inspect its functions.</div>
+
+<div style="display:flex;gap:14px;">
+
+  <div style="width:220px;flex-shrink:0;">
+    <div class="panel" style="padding:8px;">
+      <div style="color:var(--muted);font-size:0.75em;margin-bottom:8px;letter-spacing:0.08em">MODULES</div>
+      <div id="mod-list"></div>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:0;">
+    <div class="panel" id="mod-detail">
+      <div style="color:var(--muted)">select a module</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const MODULES = [
+  { id: "mod_db",         label: "MOD-D  database",     tag: "P",  desc: "SQLite core. All tables live here. Every module calls execute() — never touches sqlite3 directly." },
+  { id: "mod_signal",     label: "MOD-N  signals",       tag: "N",  desc: "Signal bus. Emit signals, attach handlers, wire routes. Every module that does something important emits a signal." },
+  { id: "mod_patterns",   label: "DEMON  catcher",       tag: "O",  desc: "Watches everything. Logs text submissions, file touches, script runs. Finds numbers in everything. Demon catcher." },
+  { id: "mod_numbers",    label: "MOD-L  luck",          tag: "L",  desc: "L IS FOR LUCK. Every string, timestamp, name has a number. Every number has a mode: FLOW/BALANCE/BUILD/CHAOS/AMPLIFIED." },
+  { id: "mod_cache",      label: "MOD-B  cache",         tag: "B",  desc: "Scoped key-value cache with expiry. In-memory fast layer + SQLite persistent layer. scope=global|session|any label." },
+  { id: "mod_lock",       label: "MOD-H  locks",         tag: "H",  desc: "Zone lock manager. Before any script touches a file, it acquires a lock. Locks auto-expire to prevent deadlocks." },
+  { id: "mod_file",       label: "MOD-G  files",         tag: "G",  desc: "File access with lock + log. Every file read/write goes through here. Direct os/open calls in scripts are bad manners." },
+  { id: "mod_scheduler",  label: "MOD-C  scheduler",     tag: "C",  desc: "APScheduler wrapper. Add scripts, trigger manually, list jobs, log every run. interval + cron triggers." },
+  { id: "mod_runner",     label: "MOD-F  runner",        tag: "F",  desc: "Subprocess runner + log catcher. Runs any Python script, captures stdout/stderr. token_cost = lines × module_calls." },
+  { id: "mod_containers", label: "MOD-M  containers",    tag: "M",  desc: "Monitor external Python processes. Simple container list — add a process path, check if running, auto-restart." },
+];
+
+const TAG_COLORS = {
+  P:"var(--cyan)", N:"var(--accent)", O:"#ff6b6b", L:"#ffd700",
+  B:"#87ceeb", H:"#ff8c00", G:"#98fb98", C:"#da70d6", F:"#ff69b4", M:"#20b2aa"
+};
+
+let _selected = null;
+
+function renderList() {
+  const el = document.getElementById('mod-list');
+  el.innerHTML = MODULES.map(m => `
+    <div class="mod-item" data-id="${m.id}"
+         onclick="selectMod('${m.id}')"
+         style="padding:6px 8px;cursor:pointer;border-radius:4px;margin-bottom:2px;display:flex;gap:8px;align-items:center;">
+      <span style="font-size:0.7em;padding:1px 5px;border-radius:3px;background:${TAG_COLORS[m.tag]}22;color:${TAG_COLORS[m.tag]};border:1px solid ${TAG_COLORS[m.tag]}44;font-weight:bold">${m.tag}</span>
+      <span style="font-size:0.82em;color:var(--text)">${m.label}</span>
+    </div>`).join('');
+}
+
+async function selectMod(id) {
+  _selected = id;
+  document.querySelectorAll('.mod-item').forEach(el =>
+    el.style.background = el.dataset.id === id ? 'var(--accent)18' : '');
+
+  const mod = MODULES.find(m => m.id === id);
+  const el = document.getElementById('mod-detail');
+  el.innerHTML = `<div style="margin-bottom:12px;">
+    <h3 style="margin-bottom:4px">${mod.label.toUpperCase()}</h3>
+    <div style="color:var(--muted);font-size:0.9em">${mod.desc}</div>
+  </div>
+  <div id="fn-list"><div style="color:var(--muted)">loading functions...</div></div>`;
+
+  const res = await fetch('/api/modules/inspect?mod=' + id);
+  const data = await res.json();
+  if (data.error) { document.getElementById('fn-list').innerHTML = `<div style="color:var(--red)">${data.error}</div>`; return; }
+
+  document.getElementById('fn-list').innerHTML = data.functions.map(fn => `
+    <div style="border:1px solid var(--border);border-radius:4px;margin-bottom:8px;overflow:hidden;">
+      <div style="padding:8px 12px;background:var(--bg2);display:flex;gap:10px;align-items:baseline;cursor:pointer"
+           onclick="this.nextSibling.style.display=this.nextSibling.style.display==='none'?'block':'none'">
+        <span style="color:var(--accent);font-family:monospace;font-size:0.9em">${fn.name}</span>
+        <span style="color:var(--muted);font-size:0.8em;font-family:monospace">${fn.sig}</span>
+        ${fn.calls_count?`<span style="margin-left:auto;color:var(--cyan);font-size:0.75em">${fn.calls_count} calls</span>`:''}
+      </div>
+      <div style="display:none;padding:8px 12px;">
+        ${fn.doc ? `<div style="color:var(--text);font-size:0.85em;margin-bottom:6px">${fn.doc}</div>` : '<div style="color:var(--muted);font-size:0.8em">no docstring</div>'}
+        ${fn.source_lines ? `<pre style="font-size:0.72em;color:var(--muted);max-height:160px;overflow-y:auto;margin:0;white-space:pre-wrap">${fn.source_lines}</pre>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+renderList();
+// auto-select first
+setTimeout(() => selectMod('mod_db'), 100);
+</script>
+{% endblock %}

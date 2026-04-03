@@ -9,6 +9,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import glob as _glob
+import inspect
 from flask import Flask, render_template, request, jsonify
 from modules import mod_db as db
 from modules import mod_signal as sig
@@ -86,6 +87,10 @@ def files_page():
 @app.route("/scripts")
 def scripts_page():
     return render_template("scripts.html")
+
+@app.route("/modules")
+def modules_page():
+    return render_template("modules.html")
 
 # ── API — signal routes ───────────────────────────────────────────────────
 
@@ -285,6 +290,60 @@ def api_files_list():
     except PermissionError:
         pass
     return jsonify({"path": path, "entries": entries})
+
+# ── API — modules inspector ───────────────────────────────────────────────
+
+_MOD_MAP = {
+    "mod_db": db, "mod_signal": sig, "mod_patterns": pat,
+    "mod_numbers": num, "mod_cache": cache, "mod_scheduler": sched,
+    "mod_runner": runner, "mod_file": mfile, "mod_lock": lock,
+}
+
+@app.route("/api/modules/inspect")
+def api_modules_inspect():
+    mod_id = request.args.get("mod", "")
+    mod = _MOD_MAP.get(mod_id)
+    if not mod:
+        # try importing mod_containers dynamically
+        try:
+            from modules import mod_containers
+            _MOD_MAP["mod_containers"] = mod_containers
+            mod = mod_containers
+        except Exception:
+            pass
+    if not mod:
+        return jsonify({"error": f"unknown module: {mod_id}"}), 400
+
+    functions = []
+    for name, fn in inspect.getmembers(mod, inspect.isfunction):
+        if name.startswith("_"):
+            continue
+        try:
+            sig_str = str(inspect.signature(fn))
+        except Exception:
+            sig_str = "(...)"
+        try:
+            doc = (inspect.getdoc(fn) or "").split("\n")[0]
+        except Exception:
+            doc = ""
+        try:
+            src_lines = inspect.getsourcelines(fn)[0]
+            # first 15 lines of source
+            src = "".join(src_lines[:15]).rstrip()
+        except Exception:
+            src = ""
+        # count calls in module_calls table
+        calls_row = db.execute(
+            "SELECT SUM(call_count) AS cnt FROM module_calls WHERE module_id=?",
+            (f"{mod_id}.{name}",), fetch="one"
+        )
+        calls = calls_row["cnt"] if calls_row and calls_row["cnt"] else 0
+        functions.append({
+            "name": name, "sig": sig_str, "doc": doc,
+            "source_lines": src, "calls_count": calls
+        })
+
+    return jsonify({"module": mod_id, "functions": functions})
 
 # ── API — scripts ──────────────────────────────────────────────────────────
 

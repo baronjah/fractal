@@ -59,6 +59,11 @@
 
 </div>
 
+<div class="panel" style="margin-top:14px;">
+  <h3>VISUALIZER — activity + module calls</h3>
+  <div id="visualizer" style="min-height:60px;color:var(--muted)">loading...</div>
+</div>
+
 <script>
 const MODE_CLASS = {FLOW:'badge-flow',CHAOS:'badge-chaos',BUILD:'badge-build',BALANCE:'badge-balance',AMPLIFIED:'badge-amp'};
 
@@ -169,9 +174,67 @@ document.getElementById('luck-form').addEventListener('submit', async e => {
 
 // initial load + live polling
 loadSignals(); loadScheduler(); loadPatterns(); loadDbStats();
+loadVisualizer();
 setInterval(loadSignals,  2000);
 setInterval(loadPatterns, 5000);
 setInterval(loadDbStats,  10000);
 setInterval(loadScheduler,10000);
+setInterval(loadVisualizer, 30000);
+
+async function loadVisualizer() {
+  // signal heatmap: count signals per hour from signal_log
+  const res = await fetch('/api/db/query', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({sql: "SELECT strftime('%H', timestamp) as hr, COUNT(*) as cnt FROM signal_log GROUP BY hr ORDER BY hr"})
+  });
+  const rows = await res.json();
+
+  // also get module call totals
+  const mres = await fetch('/api/db/query', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({sql: "SELECT module_id, SUM(call_count) as total FROM module_calls GROUP BY module_id ORDER BY total DESC LIMIT 8"})
+  });
+  const mcalls = await mres.json();
+
+  const el = document.getElementById('visualizer');
+  if (!el) return;
+
+  const maxCnt = rows.reduce((m,r)=>Math.max(m,r.cnt),1);
+  const hours = Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
+  const countByHour = Object.fromEntries((rows||[]).map(r=>[r.hr, r.cnt]));
+
+  const heatmap = `<div style="margin-bottom:12px;">
+    <div style="color:var(--muted);font-size:0.75em;letter-spacing:0.08em;margin-bottom:6px">SIGNAL ACTIVITY BY HOUR</div>
+    <div style="display:flex;gap:3px;align-items:flex-end;height:48px;">
+      ${hours.map(h=>{
+        const c = countByHour[h]||0;
+        const pct = c ? Math.max(10, Math.round((c/maxCnt)*100)) : 3;
+        const col = c ? 'var(--accent)' : 'var(--border)';
+        return `<div title="${h}:00 — ${c} signals" style="flex:1;height:${pct}%;background:${col};border-radius:2px 2px 0 0;min-height:2px;cursor:default;transition:height 0.3s"></div>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:0.65em;margin-top:2px;">
+      <span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span>
+    </div>
+  </div>`;
+
+  const modList = mcalls && mcalls.length ? `
+    <div>
+      <div style="color:var(--muted);font-size:0.75em;letter-spacing:0.08em;margin-bottom:6px">MODULE CALLS (total)</div>
+      ${mcalls.map(m=>{
+        const maxT = mcalls[0]?.total||1;
+        const pct = Math.round((m.total/maxT)*100);
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="color:var(--accent);font-size:0.78em;width:160px;overflow:hidden;text-overflow:ellipsis">${m.module_id}</span>
+          <div style="flex:1;height:6px;background:var(--border);border-radius:3px;">
+            <div style="width:${pct}%;height:100%;background:var(--cyan);border-radius:3px;"></div>
+          </div>
+          <span style="color:var(--muted);font-size:0.75em;width:30px;text-align:right">${m.total}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '<div style="color:var(--muted);font-size:0.8em">no module calls recorded yet</div>';
+
+  el.innerHTML = heatmap + modList;
+}
 </script>
 {% endblock %}
