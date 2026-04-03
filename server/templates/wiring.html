@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — WIRING MAP{% endblock %}
+{% block content %}
+<h2>◈ WIRING MAP</h2>
+<div style="color:var(--muted);font-size:0.85em;margin-bottom:16px">What touches what. Click any node to trace its connections.</div>
+
+<div style="display:flex;gap:14px;height:calc(100vh - 180px);overflow:hidden;">
+
+  <!-- LEFT: node selector -->
+  <div style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;overflow-y:auto;">
+
+    <div class="panel" style="padding:8px;">
+      <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.1em;margin-bottom:6px">MODULES</div>
+      <div id="mod-nodes"></div>
+    </div>
+
+    <div class="panel" style="padding:8px;">
+      <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.1em;margin-bottom:6px">SIGNALS</div>
+      <div id="sig-nodes"></div>
+    </div>
+
+    <div class="panel" style="padding:8px;">
+      <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.1em;margin-bottom:6px">DB TABLES</div>
+      <div id="table-nodes"></div>
+    </div>
+
+  </div>
+
+  <!-- CENTER: wiring detail -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;overflow-y:auto;">
+
+    <div class="panel" id="detail-panel" style="min-height:200px">
+      <div style="color:var(--muted);font-size:0.85em">← select a node to trace connections</div>
+    </div>
+
+    <!-- GAP LIST -->
+    <div class="panel">
+      <h3 style="margin-bottom:10px">GAP LIST — WHAT'S MISSING</h3>
+      <div id="gap-list"></div>
+    </div>
+
+    <!-- LIVE SIGNAL ROUTES -->
+    <div class="panel">
+      <h3 style="margin-bottom:8px">LIVE SIGNAL ROUTES <span style="color:var(--muted);font-weight:normal;font-size:0.85em">(signal → script)</span></h3>
+      <div id="live-routes"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <input id="new-sig-id" placeholder="signal ID (e.g. PAT)" style="width:100px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:3px;font-family:inherit;font-size:0.85em">
+        <input id="new-script" placeholder="script path" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:3px;font-family:inherit;font-size:0.85em">
+        <input id="new-label" placeholder="label" style="width:100px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:3px;font-family:inherit;font-size:0.85em">
+        <button onclick="addRoute()" style="background:var(--accent)22;border:1px solid var(--accent);color:var(--accent);padding:4px 12px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:0.85em">WIRE</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: API endpoint list -->
+  <div style="width:260px;flex-shrink:0;overflow-y:auto;">
+    <div class="panel" style="padding:8px;">
+      <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.1em;margin-bottom:8px">API ENDPOINTS ({{ endpoints|length }})</div>
+      <div id="endpoint-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// STATIC WIRING DATA (mirrors wiring_map.md)
+// ══════════════════════════════════════════════════════════════
+const MODULES = [
+  { id:'mod_db',        label:'DATABASE',    color:'#33ddff', desc:'SQLite core. Everyone calls this. THE CENTER.' },
+  { id:'mod_signal',    label:'SIGNAL BUS',  color:'#7744ff', desc:'Emit + route signals. Every action should signal.' },
+  { id:'mod_patterns',  label:'DEMON CATCH', color:'#ff6b6b', desc:'Catches all text. Feeds luck engine.' },
+  { id:'mod_numbers',   label:'LUCK ENGINE', color:'#ffd700', desc:'Every string has a number. FLOW/BUILD/CHAOS/BALANCE/AMP.' },
+  { id:'mod_cache',     label:'CACHE',       color:'#87ceeb', desc:'Key/value. In-memory + SQLite. Scoped.' },
+  { id:'mod_lock',      label:'LOCKS',       color:'#ff8c00', desc:'File locks with TTL. Acquire before write.' },
+  { id:'mod_file',      label:'FILES',       color:'#98fb98', desc:'All file I/O goes through here.' },
+  { id:'mod_scheduler', label:'SCHEDULER',   color:'#da70d6', desc:'APScheduler. interval + cron triggers.' },
+  { id:'mod_runner',    label:'RUNNER',      color:'#ff69b4', desc:'Subprocess. Captures stdout/stderr.' },
+  { id:'mod_containers',label:'CONTAINERS',  color:'#20b2aa', desc:'Monitor + restart external processes.' },
+];
+
+const SIGNALS = [
+  { id:'SYS', label:'SYSTEM',   color:'#33ddff', emitters:['boot','mod_lock','system_check.py'],          watchers:[] },
+  { id:'DAT', label:'DATA',     color:'#98fb98', emitters:['mod_file','daily_seed.py'],                   watchers:[] },
+  { id:'SCH', label:'SCHEDULE', color:'#da70d6', emitters:['mod_scheduler'],                              watchers:[] },
+  { id:'UI',  label:'UI',       color:'#7744ff', emitters:['/api/signal/emit'],                           watchers:[] },
+  { id:'PAT', label:'PATTERN',  color:'#ff6b6b', emitters:['mod_patterns.catch()','/api/patterns/catch'], watchers:[] },
+  { id:'LCK', label:'LUCK',     color:'#ffd700', emitters:['⚠ NEVER EMITTED — GAP'],                    watchers:[] },
+  { id:'EXT', label:'EXTERNAL', color:'#20b2aa', emitters:['mod_containers'],                             watchers:[] },
+];
+
+const TABLES = [
+  { id:'signal_log',     label:'signal_log',     color:'#7744ff', writtenBy:['mod_signal'],       readBy:['dashboard','signals page'] },
+  { id:'script_history', label:'script_history',  color:'#ff69b4', writtenBy:['mod_runner'],       readBy:['scripts page','scheduler page'] },
+  { id:'file_access_log',label:'file_access_log', color:'#98fb98', writtenBy:['mod_file'],         readBy:['files page'] },
+  { id:'schedule_list',  label:'schedule_list',   color:'#da70d6', writtenBy:['mod_scheduler'],    readBy:['scheduler page'] },
+  { id:'module_calls',   label:'module_calls',    color:'#87ceeb', writtenBy:['(none yet)'],       readBy:['modules page','dashboard viz'] },
+  { id:'cache_store',    label:'cache_store',     color:'#87ceeb', writtenBy:['mod_cache'],        readBy:['cache api'] },
+  { id:'patterns_log',   label:'patterns_log',    color:'#ff6b6b', writtenBy:['mod_patterns'],     readBy:['patterns page','dashboard'] },
+  { id:'lock_registry',  label:'lock_registry',   color:'#ff8c00', writtenBy:['mod_lock'],         readBy:['files page'] },
+  { id:'numbers_log',    label:'numbers_log',     color:'#ffd700', writtenBy:['mod_numbers'],      readBy:['numbers page','dashboard'] },
+  { id:'signal_routes',  label:'signal_routes',   color:'#7744ff', writtenBy:['mod_signal'],       readBy:['signals page','wiring page'] },
+];
+
+const ENDPOINTS = [
+  { method:'GET',  path:'/api/signals',                   group:'signals',   mods:['mod_signal'],               tables:['signal_log'],     sig:'' },
+  { method:'POST', path:'/api/signal/emit',               group:'signals',   mods:['mod_signal','mod_patterns'],tables:['signal_log','patterns_log'], sig:'any' },
+  { method:'GET',  path:'/api/signals/routes',            group:'signals',   mods:['mod_signal'],               tables:['signal_routes'],  sig:'' },
+  { method:'POST', path:'/api/signals/routes/add',        group:'signals',   mods:['mod_signal'],               tables:['signal_routes'],  sig:'' },
+  { method:'DEL',  path:'/api/signals/routes/<id>',       group:'signals',   mods:['mod_signal'],               tables:['signal_routes'],  sig:'' },
+  { method:'POST', path:'/api/signals/routes/<id>/toggle',group:'signals',   mods:['mod_signal'],               tables:['signal_routes'],  sig:'' },
+  { method:'GET',  path:'/api/patterns',                  group:'patterns',  mods:['mod_patterns'],             tables:['patterns_log'],   sig:'' },
+  { method:'POST', path:'/api/patterns/catch',            group:'patterns',  mods:['mod_patterns','mod_numbers'],tables:['patterns_log','numbers_log'], sig:'PAT' },
+  { method:'GET',  path:'/api/patterns/hours',            group:'patterns',  mods:['mod_patterns'],             tables:['patterns_log'],   sig:'' },
+  { method:'POST', path:'/api/numbers/calculate',         group:'numbers',   mods:['mod_numbers'],              tables:['numbers_log'],    sig:'' },
+  { method:'GET',  path:'/api/numbers/current',           group:'numbers',   mods:['mod_numbers'],              tables:['numbers_log'],    sig:'' },
+  { method:'GET',  path:'/api/numbers/log',               group:'numbers',   mods:['mod_numbers'],              tables:['numbers_log'],    sig:'' },
+  { method:'GET',  path:'/api/scheduler/jobs',            group:'scheduler', mods:['mod_scheduler'],            tables:['schedule_list'],  sig:'' },
+  { method:'POST', path:'/api/scheduler/add',             group:'scheduler', mods:['mod_scheduler'],            tables:['schedule_list'],  sig:'SCH' },
+  { method:'POST', path:'/api/scheduler/run/<id>',        group:'scheduler', mods:['mod_scheduler','mod_runner'],tables:['schedule_list','script_history'], sig:'SCH' },
+  { method:'DEL',  path:'/api/scheduler/remove/<id>',     group:'scheduler', mods:['mod_scheduler'],            tables:['schedule_list'],  sig:'' },
+  { method:'POST', path:'/api/runner/run',                group:'runner',    mods:['mod_runner'],               tables:['script_history'], sig:'' },
+  { method:'GET',  path:'/api/runner/history',            group:'runner',    mods:['mod_runner'],               tables:['script_history'], sig:'' },
+  { method:'GET',  path:'/api/db/stats',                  group:'database',  mods:['mod_db'],                   tables:['all'],            sig:'' },
+  { method:'POST', path:'/api/db/query',                  group:'database',  mods:['mod_db'],                   tables:['any (SELECT)'],   sig:'' },
+  { method:'POST', path:'/api/files/parse',               group:'files',     mods:['parser_core','mod_patterns'],tables:['patterns_log'],  sig:'PAT' },
+  { method:'GET',  path:'/api/files/list',                group:'files',     mods:['os'],                       tables:[],                 sig:'' },
+  { method:'GET',  path:'/api/files/history',             group:'files',     mods:['mod_file'],                 tables:['file_access_log'],sig:'' },
+  { method:'GET',  path:'/api/files/locks',               group:'files',     mods:['mod_lock'],                 tables:['lock_registry'],  sig:'' },
+  { method:'GET',  path:'/api/scripts/list',              group:'scripts',   mods:['os'],                       tables:[],                 sig:'' },
+  { method:'GET',  path:'/api/scripts/view',              group:'scripts',   mods:['os'],                       tables:[],                 sig:'' },
+  { method:'POST', path:'/api/scripts/run',               group:'scripts',   mods:['mod_runner'],               tables:['script_history'], sig:'' },
+  { method:'GET',  path:'/api/modules/inspect',           group:'modules',   mods:['inspect','mod_db'],         tables:['module_calls'],   sig:'' },
+  { method:'GET',  path:'/api/cache',                     group:'cache',     mods:['mod_cache'],                tables:['cache_store'],    sig:'' },
+  { method:'POST', path:'/api/cache/set',                 group:'cache',     mods:['mod_cache'],                tables:['cache_store'],    sig:'' },
+  { method:'GET',  path:'/api/cache/get/<key>',           group:'cache',     mods:['mod_cache'],                tables:['cache_store'],    sig:'' },
+];
+
+const GAPS = [
+  { priority:'HIGH',   label:'SIG_LUCK never fires', detail:'mod_numbers changes mode but emits no signal. Scripts cannot react to luck changes.', fix:'emit SIG_LUCK in log_calculation() when mode changes. ~5 lines.' },
+  { priority:'HIGH',   label:'Studio canvas not saved to server', detail:'vector_studio.html saves only to localStorage. Reload = lost if cleared.', fix:'Add /api/studio/canvas POST/GET. Store JSON in cache_store or a file.' },
+  { priority:'HIGH',   label:'Studio wires not persisted', detail:'Signal wires built in studio are lost on reload.', fix:'Add studio_wires table or store in signal_routes with element metadata.' },
+  { priority:'MEDIUM', label:'No SSE / live push', detail:'Dashboard polls every 2s. No real-time push from server.', fix:'Add /api/signals/stream SSE endpoint. flask.Response with text/event-stream.' },
+  { priority:'MEDIUM', label:'No script editor in browser', detail:'/scripts page can view but not edit scripts.', fix:'Add textarea edit + POST /api/scripts/save endpoint.' },
+  { priority:'MEDIUM', label:'No /containers page', detail:'mod_containers exists, has start/stop/restart, but no UI page.', fix:'Add /containers template + /api/containers/* endpoints.' },
+  { priority:'MEDIUM', label:'No /cache page', detail:'mod_cache has full API but no dedicated browse/edit UI.', fix:'Add /cache template showing all scopes, allow set/delete from UI.' },
+  { priority:'LOW',    label:'No element library storage', detail:'Studio presets are hardcoded JS. No server-side element packs.', fix:'Add /api/studio/library CRUD. Store named element packs as JSON.' },
+  { priority:'LOW',    label:'No theme packs', detail:'Studio uses single color scheme. No theme switching.', fix:'Add /api/studio/themes. Named CSS variable sets. One-click apply.' },
+  { priority:'LOW',    label:'module_calls table never written', detail:'module_calls table exists in DB but nothing writes to it. Shown in visualizer but always empty.', fix:'Add call-count increment in each module function (or decorator).' },
+];
+
+const GROUP_COLORS = { signals:'#7744ff', patterns:'#ff6b6b', numbers:'#ffd700', scheduler:'#da70d6', runner:'#ff69b4', database:'#33ddff', files:'#98fb98', scripts:'#ff8833', modules:'#87ceeb', cache:'#87ceeb' };
+const METHOD_COLORS = { GET:'#44ff88', POST:'#7744ff', DEL:'#ff4455', PUT:'#ffcc33' };
+const PRIORITY_COLORS = { HIGH:'#ff4455', MEDIUM:'#ffcc33', LOW:'#606080' };
+
+let _selected = null;
+
+// ══════════════════════════════════════════════════════════════
+// RENDER NODES
+// ══════════════════════════════════════════════════════════════
+function renderNodes() {
+  document.getElementById('mod-nodes').innerHTML = MODULES.map(m => `
+    <div class="wnode" data-type="module" data-id="${m.id}"
+         onclick="selectNode('module','${m.id}')"
+         style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;cursor:pointer;margin-bottom:2px;border:1px solid transparent;">
+      <span style="width:8px;height:8px;border-radius:50%;background:${m.color};flex-shrink:0"></span>
+      <span style="font-size:0.78em;color:var(--text)">${m.id}</span>
+    </div>`).join('');
+
+  document.getElementById('sig-nodes').innerHTML = SIGNALS.map(s => `
+    <div class="wnode" data-type="signal" data-id="${s.id}"
+         onclick="selectNode('signal','${s.id}')"
+         style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;cursor:pointer;margin-bottom:2px;border:1px solid transparent;">
+      <span style="font-size:0.72em;font-weight:bold;padding:1px 5px;border-radius:3px;background:${s.color}22;color:${s.color};border:1px solid ${s.color}44">${s.id}</span>
+      <span style="font-size:0.78em;color:var(--muted)">${s.label}</span>
+    </div>`).join('');
+
+  document.getElementById('table-nodes').innerHTML = TABLES.map(t => `
+    <div class="wnode" data-type="table" data-id="${t.id}"
+         onclick="selectNode('table','${t.id}')"
+         style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;cursor:pointer;margin-bottom:2px;border:1px solid transparent;">
+      <span style="width:8px;height:8px;border-radius:2px;background:${t.color}55;border:1px solid ${t.color}88;flex-shrink:0"></span>
+      <span style="font-size:0.76em;color:var(--muted)">${t.id}</span>
+    </div>`).join('');
+
+  document.getElementById('endpoint-list').innerHTML = ENDPOINTS.map(ep => `
+    <div class="wnode ep-node" data-type="endpoint" data-path="${ep.path}"
+         onclick="selectNode('endpoint','${ep.path}')"
+         style="padding:3px 6px;border-radius:3px;cursor:pointer;margin-bottom:2px;border:1px solid transparent;display:flex;align-items:center;gap:6px;">
+      <span style="font-size:0.65em;padding:1px 4px;border-radius:2px;background:${METHOD_COLORS[ep.method]||'#666'}22;color:${METHOD_COLORS[ep.method]||'#666'};font-weight:bold;min-width:28px;text-align:center">${ep.method}</span>
+      <span style="font-size:0.72em;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ep.path}</span>
+    </div>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+// SELECT NODE — SHOW DETAIL
+// ══════════════════════════════════════════════════════════════
+function selectNode(type, id) {
+  _selected = {type, id};
+
+  document.querySelectorAll('.wnode').forEach(n => {
+    n.style.background = '';
+    n.style.borderColor = 'transparent';
+  });
+  const el = document.querySelector(`.wnode[data-type="${type}"][data-id="${id}"], .wnode[data-type="${type}"][data-path="${id}"]`);
+  if (el) { el.style.background = 'var(--accent)18'; el.style.borderColor = 'var(--accent)44'; }
+
+  const panel = document.getElementById('detail-panel');
+
+  if (type === 'module') {
+    const m = MODULES.find(x => x.id === id);
+    const relEps = ENDPOINTS.filter(e => e.mods.includes(id));
+    const calledBy = ENDPOINTS.filter(e => e.mods.includes(id)).map(e => e.path);
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="width:14px;height:14px;border-radius:50%;background:${m.color}"></span>
+        <h3 style="color:${m.color};font-size:1em">${m.id}</h3>
+        <span style="color:var(--muted);font-size:0.85em">${m.label}</span>
+        <a href="/modules" style="margin-left:auto;font-size:0.78em;color:var(--accent)">INSPECT →</a>
+      </div>
+      <div style="color:var(--text);font-size:0.85em;margin-bottom:12px">${m.desc}</div>
+      <div style="color:var(--muted);font-size:0.72em;letter-spacing:0.08em;margin-bottom:6px">TOUCHED BY ${relEps.length} ENDPOINTS</div>
+      ${relEps.map(e => `
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:0.7em;font-weight:bold;padding:1px 5px;border-radius:2px;background:${METHOD_COLORS[e.method]||'#666'}22;color:${METHOD_COLORS[e.method]||'#666'}">${e.method}</span>
+          <span style="font-size:0.78em;color:var(--text)">${e.path}</span>
+          ${e.sig ? `<span style="font-size:0.7em;padding:1px 5px;border-radius:10px;background:#7744ff22;color:#7744ff;margin-left:auto">→ ${e.sig}</span>` : ''}
+        </div>`).join('')}`;
+  }
+
+  else if (type === 'signal') {
+    const s = SIGNALS.find(x => x.id === id);
+    const relEps = ENDPOINTS.filter(e => e.sig === id || e.sig === 'any');
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="font-size:0.9em;font-weight:bold;padding:3px 10px;border-radius:4px;background:${s.color}22;color:${s.color};border:1px solid ${s.color}44">${s.id}</span>
+        <span style="color:var(--text)">${s.label}</span>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="color:var(--muted);font-size:0.72em;letter-spacing:0.08em;margin-bottom:5px">EMITTED BY</div>
+        ${s.emitters.map(e => `<div style="font-size:0.82em;color:${e.includes('GAP')?'var(--red)':'var(--text)'};padding:2px 0">${e}</div>`).join('')}
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="color:var(--muted);font-size:0.72em;letter-spacing:0.08em;margin-bottom:5px">ENDPOINTS THAT FIRE THIS</div>
+        ${relEps.length ? relEps.map(e => `<div style="font-size:0.82em;color:var(--text);padding:2px 0">${e.method} ${e.path}</div>`).join('') : '<div style="color:var(--muted);font-size:0.8em">none</div>'}
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:0.72em;letter-spacing:0.08em;margin-bottom:5px">SCRIPTS WIRED TO THIS SIGNAL (live)</div>
+        <div id="live-wires-for-sig" style="color:var(--muted);font-size:0.8em">loading...</div>
+      </div>`;
+    // load live routes for this signal
+    fetch('/api/signals/routes').then(r=>r.json()).then(routes => {
+      const matching = routes.filter(r => r.signal_id === id);
+      document.getElementById('live-wires-for-sig').innerHTML = matching.length
+        ? matching.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+            <span style="color:${r.enabled?'var(--green)':'var(--muted)'}">●</span>
+            <span style="color:var(--text);font-size:0.82em">${r.script_path}</span>
+            ${r.label?`<span style="color:var(--muted);font-size:0.75em">${r.label}</span>`:''}
+          </div>`).join('')
+        : '<div style="color:var(--muted)">no scripts wired to this signal</div>';
+    });
+  }
+
+  else if (type === 'table') {
+    const t = TABLES.find(x => x.id === id);
+    const relEps = ENDPOINTS.filter(e => e.tables.includes(id) || e.tables.includes('all') || e.tables.includes('any (SELECT)'));
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="width:12px;height:12px;border-radius:2px;background:${t.color}55;border:1px solid ${t.color}88"></span>
+        <h3 style="color:${t.color};font-size:1em">${t.id}</h3>
+        <a href="/db" style="margin-left:auto;font-size:0.78em;color:var(--accent)">BROWSE →</a>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <div style="color:var(--muted);font-size:0.72em;margin-bottom:5px">WRITTEN BY</div>
+          ${t.writtenBy.map(x=>`<div style="font-size:0.82em;color:var(--text)">${x}</div>`).join('')}
+        </div>
+        <div>
+          <div style="color:var(--muted);font-size:0.72em;margin-bottom:5px">READ BY</div>
+          ${t.readBy.map(x=>`<div style="font-size:0.82em;color:var(--text)">${x}</div>`).join('')}
+        </div>
+      </div>
+      <div style="color:var(--muted);font-size:0.72em;margin-bottom:5px">ROW COUNT (live)</div>
+      <div id="live-row-count" style="color:var(--cyan);font-size:1.2em">loading...</div>
+      <div style="margin-top:12px;color:var(--muted);font-size:0.72em;margin-bottom:5px">TOUCHED BY ENDPOINTS</div>
+      ${relEps.map(e=>`<div style="font-size:0.78em;color:var(--muted);padding:2px 0">${e.method} ${e.path}</div>`).join('')}`;
+    fetch('/api/db/stats').then(r=>r.json()).then(stats => {
+      const el = document.getElementById('live-row-count');
+      if (el) el.textContent = stats[id] !== undefined ? stats[id] + ' rows' : '—';
+    });
+  }
+
+  else if (type === 'endpoint') {
+    const ep = ENDPOINTS.find(x => x.path === id);
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:0.9em;font-weight:bold;padding:3px 10px;border-radius:4px;background:${METHOD_COLORS[ep.method]||'#666'}22;color:${METHOD_COLORS[ep.method]||'#666'};border:1px solid ${METHOD_COLORS[ep.method]||'#666'}44">${ep.method}</span>
+        <code style="color:var(--cyan);font-size:0.9em">${ep.path}</code>
+        <span style="font-size:0.78em;padding:2px 8px;border-radius:10px;background:${GROUP_COLORS[ep.group]||'#666'}22;color:${GROUP_COLORS[ep.group]||'#666'}">${ep.group}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div>
+          <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.08em;margin-bottom:5px">MODULES</div>
+          ${ep.mods.map(m=>{const mod=MODULES.find(x=>x.id===m);return`<div style="display:flex;align-items:center;gap:5px;padding:2px 0"><span style="width:7px;height:7px;border-radius:50%;background:${mod?mod.color:'#666'}"></span><span style="font-size:0.8em;color:var(--text)">${m}</span></div>`;}).join('')}
+        </div>
+        <div>
+          <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.08em;margin-bottom:5px">DB TABLES</div>
+          ${ep.tables.map(t=>`<div style="font-size:0.8em;color:var(--muted)">${t}</div>`).join('')||'<div style="color:var(--muted);font-size:0.8em">none</div>'}
+        </div>
+        <div>
+          <div style="color:var(--muted);font-size:0.7em;letter-spacing:0.08em;margin-bottom:5px">SIGNAL EMITTED</div>
+          ${ep.sig?`<span style="font-size:0.8em;padding:2px 8px;border-radius:10px;background:#7744ff22;color:#7744ff">${ep.sig}</span>`:'<span style="color:var(--muted);font-size:0.8em">none</span>'}
+        </div>
+      </div>
+      <div style="color:var(--muted);font-size:0.72em;margin-bottom:6px">TRY IT</div>
+      <div style="display:flex;gap:8px">
+        ${ep.method==='GET' ? `<a href="${ep.path.replace(/<[^>]+>/g,'1')}" target="_blank" style="font-size:0.82em;padding:4px 12px;background:var(--bg3);border:1px solid var(--border);color:var(--cyan);border-radius:3px;text-decoration:none">OPEN →</a>` : ''}
+        <button onclick="testEndpoint('${ep.method}','${ep.path}')" style="font-size:0.82em;padding:4px 12px;background:var(--accent)22;border:1px solid var(--accent);color:var(--accent);border-radius:3px;cursor:pointer;font-family:inherit">TEST</button>
+      </div>
+      <div id="test-result" style="margin-top:8px;font-size:0.75em;color:var(--muted)"></div>`;
+  }
+}
+
+async function testEndpoint(method, path) {
+  const el = document.getElementById('test-result');
+  el.textContent = 'calling...';
+  const safePath = path.replace(/<[^>]+>/g, '1');
+  try {
+    const opts = method === 'GET' ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'};
+    const res = await fetch(safePath, opts);
+    const text = await res.text();
+    let pretty;
+    try { pretty = JSON.stringify(JSON.parse(text), null, 2).slice(0, 400); } catch { pretty = text.slice(0,400); }
+    el.innerHTML = `<span style="color:${res.ok?'var(--green)':'var(--red)'}">${res.status} ${res.statusText}</span><pre style="margin-top:4px;color:var(--muted);font-size:0.85em;white-space:pre-wrap">${pretty}</pre>`;
+  } catch(e) { el.textContent = 'error: ' + e.message; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// GAP LIST
+// ══════════════════════════════════════════════════════════════
+function renderGaps() {
+  document.getElementById('gap-list').innerHTML = GAPS.map(g => `
+    <div style="display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:0.7em;font-weight:bold;padding:1px 6px;border-radius:10px;background:${PRIORITY_COLORS[g.priority]}22;color:${PRIORITY_COLORS[g.priority]};min-width:52px;text-align:center">${g.priority}</span>
+      <div style="flex:1">
+        <div style="font-size:0.85em;color:var(--text);margin-bottom:2px">${g.label}</div>
+        <div style="font-size:0.78em;color:var(--muted)">${g.detail}</div>
+        <div style="font-size:0.75em;color:var(--accent);margin-top:2px">→ ${g.fix}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+// LIVE SIGNAL ROUTES
+// ══════════════════════════════════════════════════════════════
+async function loadRoutes() {
+  const res = await fetch('/api/signals/routes');
+  const routes = await res.json();
+  const el = document.getElementById('live-routes');
+  if (!routes.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:0.82em;padding:4px 0">no routes wired yet</div>';
+    return;
+  }
+  el.innerHTML = `<table style="width:100%;font-size:0.8em;border-collapse:collapse">
+    <thead><tr>
+      <th style="color:var(--muted);text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">SIGNAL</th>
+      <th style="color:var(--muted);text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">SCRIPT</th>
+      <th style="color:var(--muted);text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">LABEL</th>
+      <th style="color:var(--muted);text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">STATE</th>
+      <th style="padding:4px 8px;border-bottom:1px solid var(--border)"></th>
+    </tr></thead>
+    <tbody>${routes.map(r=>`<tr>
+      <td style="padding:4px 8px"><span style="padding:1px 6px;border-radius:10px;background:#7744ff22;color:#7744ff">${r.signal_id}</span></td>
+      <td style="padding:4px 8px;color:var(--text);font-size:0.9em">${r.script_path}</td>
+      <td style="padding:4px 8px;color:var(--muted)">${r.label||'—'}</td>
+      <td style="padding:4px 8px"><span style="color:${r.enabled?'var(--green)':'var(--muted)'}">${r.enabled?'ON':'OFF'}</span></td>
+      <td style="padding:4px 8px;text-align:right">
+        <button onclick="toggleRoute(${r.id},${r.enabled})" style="font-size:0.75em;padding:2px 7px;background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:2px;cursor:pointer;font-family:inherit">${r.enabled?'DISABLE':'ENABLE'}</button>
+        <button onclick="deleteRoute(${r.id})" style="font-size:0.75em;padding:2px 7px;background:var(--bg3);border:1px solid #ff445544;color:var(--red);border-radius:2px;cursor:pointer;font-family:inherit;margin-left:4px">✕</button>
+      </td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+async function addRoute() {
+  const sigId  = document.getElementById('new-sig-id').value.trim().toUpperCase();
+  const script = document.getElementById('new-script').value.trim();
+  const label  = document.getElementById('new-label').value.trim();
+  if (!sigId || !script) return;
+  await fetch('/api/signals/routes/add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({signal_id:sigId, script_path:script, label:label||null})
+  });
+  document.getElementById('new-sig-id').value = '';
+  document.getElementById('new-script').value = '';
+  document.getElementById('new-label').value  = '';
+  loadRoutes();
+}
+
+async function toggleRoute(id, enabled) {
+  await fetch(`/api/signals/routes/${id}/toggle`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({enabled: !enabled})
+  });
+  loadRoutes();
+}
+
+async function deleteRoute(id) {
+  await fetch(`/api/signals/routes/${id}`, {method:'DELETE'});
+  loadRoutes();
+}
+
+// ══════════════════════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════════════════════
+renderNodes();
+renderGaps();
+loadRoutes();
+</script>
+{% endblock %}

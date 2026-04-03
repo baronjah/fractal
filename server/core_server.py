@@ -96,6 +96,33 @@ def modules_page():
 def studio_page():
     return render_template("vector_studio.html")
 
+@app.route("/wiring")
+def wiring_page():
+    endpoints = [
+        {"method": m, "path": p, "group": g}
+        for m, p, g in [
+            ("GET",  "/api/signals",                    "signals"),
+            ("POST", "/api/signal/emit",                "signals"),
+            ("GET",  "/api/signals/routes",             "signals"),
+            ("POST", "/api/patterns/catch",             "patterns"),
+            ("GET",  "/api/patterns",                   "patterns"),
+            ("POST", "/api/numbers/calculate",          "numbers"),
+            ("GET",  "/api/numbers/current",            "numbers"),
+            ("GET",  "/api/scheduler/jobs",             "scheduler"),
+            ("POST", "/api/scheduler/add",              "scheduler"),
+            ("POST", "/api/runner/run",                 "runner"),
+            ("GET",  "/api/db/stats",                   "database"),
+            ("POST", "/api/db/query",                   "database"),
+            ("POST", "/api/files/parse",                "files"),
+            ("GET",  "/api/files/list",                 "files"),
+            ("GET",  "/api/scripts/list",               "scripts"),
+            ("POST", "/api/scripts/run",                "scripts"),
+            ("GET",  "/api/modules/inspect",            "modules"),
+            ("GET",  "/api/cache",                      "cache"),
+        ]
+    ]
+    return render_template("wiring.html", endpoints=endpoints)
+
 # ── API — signal routes ───────────────────────────────────────────────────
 
 @app.route("/api/signals/routes")
