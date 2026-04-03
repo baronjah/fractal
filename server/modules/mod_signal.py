@@ -5,6 +5,7 @@ Every module that does something important emits a signal.
 """
 
 import json
+import threading
 from datetime import datetime
 from . import mod_db as db
 
@@ -45,7 +46,44 @@ def emit(signal_id: str, source: str = None, target: str = None, payload: dict =
                 "INSERT INTO signal_log (signal_id, source, target, status, payload) VALUES (?,?,?,?,?)",
                 (SIG_SYSTEM, "mod_signal", source, "handler_error", json.dumps({"error": str(e)}))
             )
+    # fire signal routes (script_path mapped to this signal)
+    routes = db.execute(
+        "SELECT script_path FROM signal_routes WHERE signal_id=? AND enabled=1",
+        (signal_id,), fetch="all"
+    )
+    for route in routes:
+        try:
+            from . import mod_runner as runner
+            threading.Thread(
+                target=runner.run_script,
+                args=(route["script_path"],),
+                kwargs={"caller": f"signal_route:{signal_id}"},
+                daemon=True
+            ).start()
+        except Exception:
+            pass
+
     return row_id
+
+
+def add_route(signal_id: str, script_path: str, label: str = None) -> int:
+    """Map signal_id → script_path. Script runs whenever signal fires."""
+    return db.execute(
+        "INSERT OR REPLACE INTO signal_routes (signal_id, script_path, label) VALUES (?,?,?)",
+        (signal_id, script_path, label)
+    )
+
+
+def remove_route(route_id: int):
+    db.execute("DELETE FROM signal_routes WHERE id=?", (route_id,))
+
+
+def toggle_route(route_id: int, enabled: bool):
+    db.execute("UPDATE signal_routes SET enabled=? WHERE id=?", (int(enabled), route_id))
+
+
+def list_routes() -> list:
+    return db.execute("SELECT * FROM signal_routes ORDER BY signal_id, id", fetch="all")
 
 
 def get_log(limit: int = 50, filter_source: str = None, filter_signal: str = None) -> list:

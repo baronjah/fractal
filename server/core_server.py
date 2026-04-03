@@ -8,6 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
+import glob as _glob
 from flask import Flask, render_template, request, jsonify
 from modules import mod_db as db
 from modules import mod_signal as sig
@@ -23,9 +24,29 @@ app = Flask(__name__, template_folder="templates")
 
 # ── Boot ───────────────────────────────────────────────────────────────────
 
+_SERVER_DIR = os.path.dirname(__file__)
+_SCRIPTS_DIR = os.path.join(_SERVER_DIR, "scripts")
+_DROP_DIR    = os.path.join(_SCRIPTS_DIR, "drop")
+
+
 def boot():
     db.init_db()
     sched.start()
+
+    # create scripts/ and drop/ folder
+    os.makedirs(_SCRIPTS_DIR, exist_ok=True)
+    os.makedirs(_DROP_DIR, exist_ok=True)
+
+    # auto-seed: log today's luck on every boot
+    from datetime import date
+    today = str(date.today())
+    existing = db.execute(
+        "SELECT id FROM numbers_log WHERE input=? AND notes='boot_seed'",
+        (today,), fetch="one"
+    )
+    if not existing:
+        num.log_calculation(today, notes="boot_seed")
+
     sig.emit(sig.SIG_SYSTEM, source="core_server", payload={"action": "boot", "port": 5331})
     print("[FRACTAL] booted on port 5331")
 
@@ -57,6 +78,37 @@ def database_page():
 def numbers_page():
     luck = num.current_mode()
     return render_template("numbers.html", luck=luck)
+
+@app.route("/files")
+def files_page():
+    return render_template("files.html")
+
+@app.route("/scripts")
+def scripts_page():
+    return render_template("scripts.html")
+
+# ── API — signal routes ───────────────────────────────────────────────────
+
+@app.route("/api/signals/routes")
+def api_signal_routes():
+    return jsonify(sig.list_routes())
+
+@app.route("/api/signals/routes/add", methods=["POST"])
+def api_route_add():
+    body = request.get_json(force=True) or {}
+    rid = sig.add_route(body["signal_id"], body["script_path"], body.get("label"))
+    return jsonify({"ok": True, "id": rid})
+
+@app.route("/api/signals/routes/<int:rid>", methods=["DELETE"])
+def api_route_remove(rid):
+    sig.remove_route(rid)
+    return jsonify({"ok": True})
+
+@app.route("/api/signals/routes/<int:rid>/toggle", methods=["POST"])
+def api_route_toggle(rid):
+    body = request.get_json(force=True) or {}
+    sig.toggle_route(rid, bool(body.get("enabled", True)))
+    return jsonify({"ok": True})
 
 # ── API — signals ──────────────────────────────────────────────────────────
 
@@ -196,6 +248,81 @@ def api_file_history():
 @app.route("/api/files/locks")
 def api_locks():
     return jsonify(lock.list_locks())
+
+# ── API — files browser ───────────────────────────────────────────────────
+
+@app.route("/api/files/parse", methods=["POST"])
+def api_files_parse():
+    body = request.get_json(force=True) or {}
+    path = body.get("path", "")
+    if not os.path.isfile(path):
+        return jsonify({"error": f"not a file: {path}"}), 400
+    try:
+        sys.path.insert(0, os.path.join(_SERVER_DIR, ".."))
+        from parsers.parser_core import parse_file
+        result = parse_file(path, send_to_catcher=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/files/list")
+def api_files_list():
+    path = request.args.get("path", _SCRIPTS_DIR)
+    if not os.path.isdir(path):
+        return jsonify({"error": "not a directory"}), 400
+    entries = []
+    try:
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            stat = os.stat(full)
+            entries.append({
+                "name": name,
+                "path": full,
+                "is_dir": os.path.isdir(full),
+                "size": stat.st_size,
+                "modified": stat.st_mtime
+            })
+    except PermissionError:
+        pass
+    return jsonify({"path": path, "entries": entries})
+
+# ── API — scripts ──────────────────────────────────────────────────────────
+
+@app.route("/api/scripts/list")
+def api_scripts_list():
+    scripts = []
+    for ext in ("*.py",):
+        for p in _glob.glob(os.path.join(_SCRIPTS_DIR, "**", ext), recursive=True):
+            stat = os.stat(p)
+            scripts.append({
+                "path": p,
+                "name": os.path.basename(p),
+                "rel": os.path.relpath(p, _SCRIPTS_DIR),
+                "size": stat.st_size,
+                "modified": stat.st_mtime
+            })
+    return jsonify(sorted(scripts, key=lambda x: x["name"]))
+
+@app.route("/api/scripts/view")
+def api_scripts_view():
+    path = request.args.get("path", "")
+    if not path.startswith(_SCRIPTS_DIR) or not os.path.isfile(path):
+        return jsonify({"error": "invalid path"}), 400
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return jsonify({"path": path, "content": content, "lines": len(content.splitlines())})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scripts/run", methods=["POST"])
+def api_scripts_run():
+    body = request.get_json(force=True) or {}
+    path = body.get("path", "")
+    if not path.startswith(_SCRIPTS_DIR) or not os.path.isfile(path):
+        return jsonify({"error": "invalid path"}), 400
+    result = runner.run_script(path, caller="scripts_page")
+    return jsonify(result)
 
 # ── API — cache ────────────────────────────────────────────────────────────
 

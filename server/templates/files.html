@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — FILES{% endblock %}
+{% block content %}
+<h2>◈ FILES</h2>
+
+<div class="grid2" style="margin-bottom:14px;">
+  <div class="panel">
+    <h3>PARSE A FILE</h3>
+    <form id="parse-form" style="margin-bottom:10px;">
+      <div style="margin-bottom:6px;">
+        <input id="parse-path" placeholder="full path to file..." style="width:100%; box-sizing:border-box;">
+      </div>
+      <button type="submit" style="width:100%">PARSE + CATCH</button>
+    </form>
+    <div id="parse-result"></div>
+  </div>
+
+  <div class="panel">
+    <h3>BROWSE DIRECTORY</h3>
+    <div style="display:flex; gap:6px; margin-bottom:8px;">
+      <input id="browse-path" placeholder="directory path..." style="flex:1;">
+      <button onclick="browseDir()">GO</button>
+    </div>
+    <div id="crumb" style="color:var(--muted); font-size:0.8em; margin-bottom:6px;"></div>
+    <div id="dir-list" style="max-height:260px; overflow-y:auto;"></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>PARSE RESULT</h3>
+  <div id="parse-detail" style="color:var(--muted);">submit a path above</div>
+</div>
+
+<div class="panel" style="margin-top:14px;">
+  <h3>FILE TOUCH HISTORY (last 30)</h3>
+  <div id="file-history">loading...</div>
+</div>
+
+<script>
+let _currentPath = '';
+
+document.getElementById('parse-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const path = document.getElementById('parse-path').value.trim();
+  if (!path) return;
+  const btn = e.target.querySelector('button');
+  btn.textContent = 'PARSING...'; btn.disabled = true;
+
+  const res = await fetch('/api/files/parse', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path})
+  });
+  const d = await res.json();
+  btn.textContent = 'PARSE + CATCH'; btn.disabled = false;
+
+  if (d.error) {
+    document.getElementById('parse-result').innerHTML =
+      `<div style="color:var(--red)">${d.error}</div>`;
+    return;
+  }
+
+  document.getElementById('parse-result').innerHTML =
+    `<div style="color:var(--green)">OK — ${d.line_count} lines, ${d.word_count} words</div>
+     ${d.functions?.length ? `<div style="color:var(--accent);font-size:0.85em">funcs: ${d.functions.join(', ')}</div>` : ''}
+     ${d.numbers?.length ? `<div style="color:var(--cyan);font-size:0.85em">numbers: ${d.numbers.slice(0,20).join(', ')}</div>` : ''}`;
+
+  document.getElementById('parse-detail').innerHTML =
+    `<div style="margin-bottom:8px;">
+      <span style="color:var(--accent)">${d.file}</span>
+      <span style="color:var(--muted); margin-left:12px;">${d.ext}</span>
+      <span style="color:var(--cyan); margin-left:12px;">${d.char_count} chars</span>
+    </div>
+    ${d.headers?.length ? `<div style="margin-bottom:6px;"><span style="color:var(--muted)">headers:</span> ${d.headers.map(h=>`<span style="color:var(--text);margin-right:8px">${h}</span>`).join('')}</div>` : ''}
+    <pre style="max-height:200px;overflow-y:auto;font-size:0.75em;color:var(--muted);white-space:pre-wrap;">${(d.cleaned_text||'').slice(0,2000)}</pre>`;
+
+  loadHistory();
+});
+
+async function browseDir(path) {
+  path = path || document.getElementById('browse-path').value.trim() || 'D:\\fractal\\server\\scripts';
+  const res = await fetch('/api/files/list?path=' + encodeURIComponent(path));
+  const d = await res.json();
+  if (d.error) { document.getElementById('dir-list').innerHTML = `<div style="color:var(--red)">${d.error}</div>`; return; }
+
+  _currentPath = d.path;
+  document.getElementById('crumb').textContent = d.path;
+  document.getElementById('browse-path').value = d.path;
+
+  const items = d.entries;
+  if (!items.length) { document.getElementById('dir-list').innerHTML = '<div style="color:var(--muted)">empty</div>'; return; }
+
+  document.getElementById('dir-list').innerHTML = items.map(item => `
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)20;cursor:pointer;"
+         onclick="${item.is_dir ? `browseDir('${item.path.replace(/\\/g,'\\\\')}')`:`selectFile('${item.path.replace(/\\/g,'\\\\')}')`}">
+      <span style="color:${item.is_dir?'var(--accent)':'var(--text)'};font-size:0.9em;min-width:14px">${item.is_dir?'▸':' '}</span>
+      <span style="flex:1;font-size:0.85em;${item.is_dir?'color:var(--accent)':''}">${item.name}</span>
+      ${!item.is_dir?`<span style="color:var(--muted);font-size:0.75em">${(item.size/1024).toFixed(1)}k</span>`:''}
+    </div>`).join('');
+}
+
+function selectFile(path) {
+  document.getElementById('parse-path').value = path;
+}
+
+async function loadHistory() {
+  const res = await fetch('/api/files/history?limit=30');
+  const rows = await res.json();
+  const el = document.getElementById('file-history');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted)">no file touches yet</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>TIME</th><th>FILE</th><th>ACTION</th><th>SCRIPT</th><th>LOCK</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td style="color:var(--muted)">${(r.timestamp||'').slice(11,19)}</td>
+      <td style="font-size:0.8em;max-width:280px;overflow:hidden;text-overflow:ellipsis">${r.file_path||''}</td>
+      <td><span style="color:var(--cyan)">${r.action||''}</span></td>
+      <td style="font-size:0.8em;color:var(--muted)">${r.script_id||''}</td>
+      <td style="font-size:0.8em">${r.lock_state||''}</td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+browseDir('D:\\fractal\\server\\scripts');
+loadHistory();
+</script>
+{% endblock %}

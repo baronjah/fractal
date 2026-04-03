@@ -22,8 +22,29 @@
   </div>
 </div>
 
-<div class="panel">
+<div class="panel" style="margin-bottom:14px;">
   <div id="signal-table">loading...</div>
+</div>
+
+<div class="panel">
+  <h3>SIGNAL → ACTION ROUTES</h3>
+  <div style="margin-bottom:10px;">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <select id="new-sig" style="width:120px">
+        <option value="SYS">SYS</option>
+        <option value="DAT">DAT</option>
+        <option value="SCH">SCH</option>
+        <option value="UI">UI</option>
+        <option value="PAT">PAT</option>
+        <option value="LCK">LCK</option>
+        <option value="EXT">EXT</option>
+      </select>
+      <input id="new-script" placeholder="script path..." style="flex:1;min-width:200px">
+      <input id="new-label" placeholder="label (optional)" style="width:160px">
+      <button onclick="addRoute()">ADD ROUTE</button>
+    </div>
+  </div>
+  <div id="routes-table">loading...</div>
 </div>
 
 <script>
@@ -63,5 +84,50 @@ async function emitUI() {
 
 loadSignals();
 setInterval(loadSignals, 2000);
+loadRoutes();
+
+async function loadRoutes() {
+  const res = await fetch('/api/signals/routes');
+  const rows = await res.json();
+  const el = document.getElementById('routes-table');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted)">no routes yet — add one above</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>#</th><th>SIGNAL</th><th>SCRIPT</th><th>LABEL</th><th>ON</th><th></th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td style="color:var(--muted)">${r.id}</td>
+      <td><span style="color:var(--accent)">${r.signal_id}</span></td>
+      <td style="font-size:0.8em">${r.script_path}</td>
+      <td style="color:var(--muted);font-size:0.8em">${r.label||''}</td>
+      <td><input type="checkbox" ${r.enabled?'checked':''} onchange="toggleRoute(${r.id},this.checked)"></td>
+      <td><button onclick="deleteRoute(${r.id})" style="font-size:0.75em;padding:2px 6px;background:var(--red)18;border-color:var(--red)44;color:var(--red)">×</button></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function addRoute() {
+  const sig_id = document.getElementById('new-sig').value;
+  const script_path = document.getElementById('new-script').value.trim();
+  const label = document.getElementById('new-label').value.trim();
+  if (!script_path) return;
+  await fetch('/api/signals/routes/add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({signal_id: sig_id, script_path, label: label||null})
+  });
+  document.getElementById('new-script').value = '';
+  document.getElementById('new-label').value = '';
+  loadRoutes();
+}
+
+async function toggleRoute(id, enabled) {
+  await fetch(`/api/signals/routes/${id}/toggle`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({enabled})
+  });
+}
+
+async function deleteRoute(id) {
+  await fetch(`/api/signals/routes/${id}`, {method:'DELETE'});
+  loadRoutes();
+}
 </script>
 {% endblock %}

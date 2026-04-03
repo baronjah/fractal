@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}FRACTAL — SCRIPTS{% endblock %}
+{% block content %}
+<h2>◈ SCRIPTS</h2>
+
+<div class="grid2" style="margin-bottom:14px;">
+
+  <div class="panel" style="display:flex;flex-direction:column;gap:0;">
+    <h3>SCRIPT LIST</h3>
+    <div id="script-list" style="flex:1;overflow-y:auto;max-height:400px;">loading...</div>
+    <div style="margin-top:8px;color:var(--muted);font-size:0.8em;">
+      scripts live in <code>server/scripts/</code> — drop .py files there to pick them up
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>INSPECTOR</h3>
+    <div id="inspector-meta" style="color:var(--muted);font-size:0.8em;margin-bottom:6px;"></div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;" id="inspector-actions" style="display:none">
+      <button id="run-btn" onclick="runSelected()" style="background:var(--green)20;border-color:var(--green)44;color:var(--green)">RUN</button>
+      <button onclick="reloadScripts()" style="font-size:0.8em">REFRESH LIST</button>
+    </div>
+    <pre id="inspector-code" style="max-height:340px;overflow-y:auto;font-size:0.75em;color:var(--text);white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);padding:10px;border-radius:4px;">select a script</pre>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:14px;">
+  <h3>RUN OUTPUT</h3>
+  <pre id="run-output" style="max-height:180px;overflow-y:auto;font-size:0.8em;color:var(--green);white-space:pre-wrap;min-height:40px;">no run yet</pre>
+</div>
+
+<div class="panel">
+  <h3>RUN HISTORY (last 20)</h3>
+  <div id="run-history">loading...</div>
+</div>
+
+<script>
+let _selectedPath = null;
+
+async function reloadScripts() {
+  const res = await fetch('/api/scripts/list');
+  const scripts = await res.json();
+  const el = document.getElementById('script-list');
+  if (!scripts.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">no scripts yet — add .py files to server/scripts/</div>';
+    return;
+  }
+  el.innerHTML = scripts.map(s => `
+    <div class="script-item" data-path="${s.path}"
+         onclick="selectScript('${s.path.replace(/\\/g,'\\\\')}')"
+         style="padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--border)20;display:flex;gap:8px;align-items:center;">
+      <span style="color:var(--accent);font-size:0.85em;flex:1">${s.rel}</span>
+      <span style="color:var(--muted);font-size:0.75em">${(s.size/1024).toFixed(1)}k</span>
+    </div>`).join('');
+}
+
+async function selectScript(path) {
+  _selectedPath = path;
+  // highlight
+  document.querySelectorAll('.script-item').forEach(el => el.style.background = '');
+  const item = document.querySelector(`.script-item[data-path="${path}"]`);
+  if (item) item.style.background = 'var(--accent)18';
+
+  const res = await fetch('/api/scripts/view?path=' + encodeURIComponent(path));
+  const d = await res.json();
+  if (d.error) { document.getElementById('inspector-code').textContent = d.error; return; }
+
+  document.getElementById('inspector-meta').textContent = `${path}  ·  ${d.lines} lines`;
+  document.getElementById('inspector-code').textContent = d.content;
+  document.getElementById('inspector-actions').style.display = 'flex';
+}
+
+async function runSelected() {
+  if (!_selectedPath) return;
+  const btn = document.getElementById('run-btn');
+  btn.textContent = 'RUNNING...'; btn.disabled = true;
+  document.getElementById('run-output').textContent = 'running...';
+
+  const res = await fetch('/api/scripts/run', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({path: _selectedPath})
+  });
+  const d = await res.json();
+  btn.textContent = 'RUN'; btn.disabled = false;
+
+  const out = (d.stdout || '') + (d.stderr ? '\n--- STDERR ---\n' + d.stderr : '');
+  document.getElementById('run-output').textContent = out || '(no output)';
+  document.getElementById('run-output').style.color = d.returncode === 0 ? 'var(--green)' : 'var(--red)';
+  loadHistory();
+}
+
+async function loadHistory() {
+  const res = await fetch('/api/runner/history?limit=20');
+  const rows = await res.json();
+  const el = document.getElementById('run-history');
+  if (!rows.length) { el.innerHTML = '<div style="color:var(--muted)">no runs yet</div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>TIME</th><th>SCRIPT</th><th>ms</th><th>TOKENS</th><th>RESULT</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td style="color:var(--muted)">${(r.run_time||'').slice(11,19)}</td>
+      <td style="font-size:0.8em;max-width:260px;overflow:hidden;text-overflow:ellipsis">${r.script_id||''}</td>
+      <td style="color:var(--cyan)">${r.duration_ms||0}</td>
+      <td style="color:var(--muted)">${r.tokens_used||0}</td>
+      <td><span style="color:${r.result==='ok'?'var(--green)':'var(--red)'}">${r.result||''}</span></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+reloadScripts();
+loadHistory();
+setInterval(loadHistory, 10000);
+</script>
+{% endblock %}

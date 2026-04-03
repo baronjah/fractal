@@ -126,6 +126,16 @@ def init_db():
                 luck_mode        TEXT,
                 notes            TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS signal_routes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id   TEXT    NOT NULL,
+                script_path TEXT    NOT NULL,
+                label       TEXT,
+                enabled     INTEGER DEFAULT 1,
+                created_at  TEXT    DEFAULT (datetime('now')),
+                UNIQUE(signal_id, script_path)
+            );
         """)
     return True
 
@@ -155,7 +165,7 @@ def table_stats():
     tables = [
         "signal_log", "script_history", "file_access_log",
         "schedule_list", "module_calls", "cache_store",
-        "patterns_log", "lock_registry", "numbers_log"
+        "patterns_log", "lock_registry", "numbers_log", "signal_routes"
     ]
     stats = {}
     for t in tables:
