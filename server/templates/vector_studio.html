@@ -741,7 +741,7 @@ function finalizeGhost(pt) {
       fill: getFill(), stroke: getStroke(), opacity: 1,
       rx: parseInt(document.getElementById('prop-radius').value)||0 });
   } else if (_tool === 'ellipse') {
-    addElement({ type:'ellipse', x: x+w/2, y: y+h/2, rx: w/2, ry: h/2,
+    addElement({ type:'ellipse', cx: x+w/2, cy: y+h/2, rx: w/2, ry: h/2,
       fill: getFill(), stroke: getStroke(), opacity: 1 });
   } else if (_tool === 'line') {
     addElement({ type:'line', x1: _drawStart.x, y1: _drawStart.y,
